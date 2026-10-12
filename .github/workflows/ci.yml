@@ -26,5 +26,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
       - name: Validate manifest.json
         run: bun -e "JSON.parse(await Bun.file('extension/manifest.json').text()); console.log('manifest OK')"
