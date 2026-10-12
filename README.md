@@ -63,17 +63,25 @@ to `mcp-server/src/index.ts` and make sure `bun` is on your `PATH`.
 | Gemini CLI | `~/.gemini/settings.json` (global) or `.gemini/settings.json` (project), or `gemini mcp add` CLI |
 | Antigravity | `~/.gemini/config/mcp_config.json` (global) or `.agents/mcp_config.json` (workspace) |
 
-**OpenCode** (`opencode.json`):
+**OpenCode v2** (`opencode.json` / `opencode.jsonc`) — via CLI (recommended):
+
+```powershell
+opencode mcp add browser -- bun run <path-to-repo>/mcp-server/src/index.ts
+```
+
+or by hand:
 
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
   "mcp": {
-    "browser": {
-      "type": "local",
-      "command": ["bun", "run", "<path-to-repo>/mcp-server/src/index.ts"],
-      "environment": {
-        "BROWSER_MCP_PORT": "8765"
+    "servers": {
+      "browser": {
+        "type": "local",
+        "command": ["bun", "run", "<path-to-repo>/mcp-server/src/index.ts"],
+        "environment": {
+          "BROWSER_MCP_PORT": "8765"
+        }
       }
     }
   }
@@ -81,6 +89,8 @@ to `mcp-server/src/index.ts` and make sure `bun` is on your `PATH`.
 ```
 
 `environment` is optional — omit it to use the default port (`8765`). See [Custom Port Selection](#custom-port-selection).
+Verify with `opencode mcp list` (should show `browser connected`).
+Note: OpenCode v1 nests servers directly under `mcp` without the `servers` key.
 
 **Claude Code** — via CLI (recommended):
 
