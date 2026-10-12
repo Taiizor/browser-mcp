@@ -57,10 +57,11 @@ to `mcp-server/src/index.ts` and make sure `bun` is on your `PATH`.
 | OpenCode | `opencode.json` |
 | Claude Code | `.mcp.json` (project) or `claude mcp add` CLI |
 | Claude Desktop | `claude_desktop_config.json` |
-| Cursor | `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` |
+| Cursor | `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (global) |
 | Windsurf | `~/.codeium/windsurf/mcp_config.json` |
-| VS Code (Copilot) | `.vscode/mcp.json` |
-| Gemini CLI | `~/.gemini/settings.json` |
+| VS Code (Copilot) | `.vscode/mcp.json` (or portable `.mcp.json` at workspace root) |
+| Gemini CLI | `~/.gemini/settings.json` (global) or `.gemini/settings.json` (project), or `gemini mcp add` CLI |
+| Antigravity | `~/.gemini/config/mcp_config.json` (global) or `.agents/mcp_config.json` (workspace) |
 
 **OpenCode** (`opencode.json`):
 
@@ -88,6 +89,7 @@ or via `.mcp.json`:
 {
   "mcpServers": {
     "browser": {
+      "type": "stdio",
       "command": "bun",
       "args": ["run", "<path-to-repo>/mcp-server/src/index.ts"]
     }
@@ -95,7 +97,7 @@ or via `.mcp.json`:
 }
 ```
 
-**Claude Desktop / Cursor / Windsurf / Gemini CLI** (`mcpServers` format):
+**Claude Desktop / Cursor / Windsurf / Gemini CLI / Antigravity** (`mcpServers` format):
 
 ```json
 {
@@ -107,6 +109,16 @@ or via `.mcp.json`:
   }
 }
 ```
+
+File locations per client:
+- **Claude Desktop:** `claude_desktop_config.json` (`%APPDATA%\Claude\` on Windows, `~/Library/Application Support/Claude/` on macOS) — restart the app after editing.
+- **Cursor:** `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (global).
+- **Windsurf:** `~/.codeium/windsurf/mcp_config.json` (global only).
+- **Gemini CLI:** `~/.gemini/settings.json` (global) or `.gemini/settings.json` (project) — or via CLI:
+  ```powershell
+  gemini mcp add -s user browser bun -- run <path-to-repo>/mcp-server/src/index.ts
+  ```
+- **Antigravity:** `~/.gemini/config/mcp_config.json` (global) or `.agents/mcp_config.json` (workspace) — also editable via *Agent panel → ⋯ → MCP Servers → Manage MCP Servers → View raw config*.
 
 **VS Code** (`.vscode/mcp.json`):
 
@@ -121,6 +133,8 @@ or via `.mcp.json`:
   }
 }
 ```
+
+Note: VS Code also reads the portable `.mcp.json` (`mcpServers` format) at the workspace root.
 
 **Any other stdio-capable client:** command `bun`, args
 `["run", "<path-to-repo>/mcp-server/src/index.ts"]`, optional env
