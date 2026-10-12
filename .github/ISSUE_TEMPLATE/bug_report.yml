@@ -1,0 +1,66 @@
+name: Bug report
+description: Report something that is not working as expected.
+title: "fix: "
+labels: ["type: bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Please fill in the details below.
+        For security vulnerabilities, use [Security Advisories](https://github.com/Taiizor/browser-mcp/security/advisories/new) instead.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - Extension
+        - MCP server
+        - Both / bridge
+        - Documentation
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: Extension version, mcp-server version, Bun version, browser + version, OS.
+      placeholder: "ext 0.3.0, server 0.3.0, bun 1.4.2, Chrome 131, Windows 11"
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start server with ...
+        2. Call tool ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / screenshots
+      description: Paste MCP server output, extension popup state, or console errors. Wrap logs in code blocks.
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues for duplicates
+          required: true
+        - label: I can reproduce on the latest `develop`
+          required: false

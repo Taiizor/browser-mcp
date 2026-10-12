@@ -1,5 +1,10 @@
 # Browser MCP — Full-Authority Browser Bridge (Chromium)
 
+[![CI](https://github.com/Taiizor/browser-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/Taiizor/browser-mcp/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Bun](https://img.shields.io/badge/runtime-Bun-black?logo=bun)](https://bun.sh)
+[![Chrome MV3](https://img.shields.io/badge/extension-Chrome%20MV3-blue?logo=googlechrome)](extension/)
+
 MCP server (`stdio`) + Chrome/Edge extension (`WebSocket`) with access to everything
 in the browser: clicking, typing, search, tab & window management, tab groups, network intercept/throttle,
 console, cookies, storage, offscreen clipboard, desktop notifications, session restore, screenshots, PDF, and CDP.
@@ -19,23 +24,25 @@ extension/ (Chrome MV3, WS client with alarms heartbeat & Origin security)
   └── content.js    → DOM snapshot, click, type, reactive page_wait, JS evaluate, console hook
 ```
 
-## Setup
+## Quick Start
 
 ### 1. MCP server
 
+Requirements: [Bun](https://bun.sh) >= 1.1.
+
 ```powershell
-cd Browser/mcp-server
+cd mcp-server
 bun install
 # Run server (default port 8765):
-# bun run src/index.ts
+bun run src/index.ts
 # Or with a custom port:
-# bun run src/index.ts --port 9000
+bun run src/index.ts --port 9000
 ```
 
 ### 2. Extension (Chrome / Edge)
 
 1. `chrome://extensions` → enable **Developer Mode**.
-2. **Load unpacked** → select the `Browser/extension/` folder.
+2. **Load unpacked** → select the `extension/` folder.
 3. Click the **Browser MCP** toolbar icon → you should see `Connected`.
 4. Configure or switch ports instantly in the popup footer if needed.
 
@@ -47,11 +54,9 @@ bun install
 {
   "$schema": "https://opencode.ai/config.json",
   "mcp": {
-    "servers": {
-      "browser": {
-        "type": "local",
-        "command": ["bun", "run", "E:/MyProject/Mix/MCP/Browser/mcp-server/src/index.ts"]
-      }
+    "browser": {
+      "type": "local",
+      "command": ["bun", "run", "<path-to-repo>/mcp-server/src/index.ts"]
     }
   }
 }
@@ -130,3 +135,16 @@ Ready-to-use workflows for AI agents:
 - **Origin Validation:** The WebSocket server checks the `Origin` header on connection, rejecting requests originating from web pages (`http://`, `https://`) while allowing extension and local scripts.
 - **Service Worker Keep-Alive:** Manifest V3 service worker lifecycle is protected with a `chrome.alarms` heartbeat (`mcp_heartbeat`), waking up the worker and auto-reconnecting if disconnected.
 - **Reactive page_wait:** Uses `MutationObserver` to wait for elements, text, URLs (`url`, `urlPattern`), or document `readyState` without polling lag.
+- The bridge listens on loopback only (`127.0.0.1`) — see [SECURITY.md](SECURITY.md) for the threat model and how to report vulnerabilities privately.
+
+---
+
+## Contributing
+
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) and the
+[Code of Conduct](CODE_OF_CONDUCT.md) first. Bug reports and feature requests use
+issue templates; PRs should target the `develop` branch.
+
+## License
+
+[MIT](LICENSE) © 2026 Taiizor.

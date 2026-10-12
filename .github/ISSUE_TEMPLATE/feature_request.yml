@@ -1,0 +1,47 @@
+name: Feature request
+description: Suggest a new tool, capability, or improvement.
+title: "feat: "
+labels: ["type: enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for the idea! Describe the problem first, then the proposed solution.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - New MCP tool
+        - Extension
+        - MCP server
+        - Documentation / DX
+        - CI / repo tooling
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / use case
+      description: What can't you do today? What workflow does this unblock?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: API shape, tool name/parameters, UX sketch, alternatives considered.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues for duplicates
+          required: true
+        - label: I am willing to contribute a PR for this
+          required: false
