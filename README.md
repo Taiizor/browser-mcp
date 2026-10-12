@@ -4,6 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Bun](https://img.shields.io/badge/Runtime-Bun-black?logo=bun)](https://bun.sh)
 [![Chrome MV3](https://img.shields.io/badge/Extension-Chrome%20MV3-blue?logo=googlechrome)](extension/)
+[![Edge Add-ons](https://img.shields.io/badge/Edge_Add--ons-Get_it-blue?logo=microsoftedge)](https://microsoftedge.microsoft.com/addons/detail/hdhibkihdkndmfecegdnbpebolhokkbh)
 
 MCP server (`stdio`) + Chrome/Edge extension (`WebSocket`) with access to everything
 in the browser: clicking, typing, search, tab & window management, tab groups, network intercept/throttle,
@@ -40,6 +41,9 @@ bun run src/index.ts --port 9000
 ```
 
 ### 2. Extension (Chrome / Edge)
+
+Install from the [Edge Add-ons store](https://microsoftedge.microsoft.com/addons/detail/hdhibkihdkndmfecegdnbpebolhokkbh),
+or load unpacked for development:
 
 1. `chrome://extensions` → enable **Developer Mode**.
 2. **Load unpacked** → select the `extension/` folder.
