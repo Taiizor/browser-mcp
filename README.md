@@ -51,6 +51,9 @@ bun run src/index.ts --port 9000
 The server runs over `stdio`, so any MCP-compatible client works. Use an **absolute path**
 to `mcp-server/src/index.ts` and make sure `bun` is on your `PATH`.
 (On Windows, use forward slashes or escaped backslashes in JSON.)
+> **PATH tip:** GUI-launched clients (Claude Desktop, Cursor, Windsurf…) may not inherit
+> your shell `PATH`. If the server fails to start, put the full path to `bun` in `command`
+> (find it with `where bun` on Windows / `which bun` on macOS-Linux).
 
 | Client | Config file |
 |---|---|
@@ -58,8 +61,8 @@ to `mcp-server/src/index.ts` and make sure `bun` is on your `PATH`.
 | Claude Code | `.mcp.json` (project) or `claude mcp add` CLI |
 | Claude Desktop | `claude_desktop_config.json` |
 | Cursor | `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (global) |
-| Windsurf | `~/.codeium/windsurf/mcp_config.json` |
-| VS Code (Copilot) | `.vscode/mcp.json` (or portable `.mcp.json` at workspace root) |
+| Windsurf | `~/.config/devin/mcp_config.json` (see note below) |
+| VS Code (Copilot) | `.mcp.json` at workspace root (portable format) |
 | Gemini CLI | `~/.gemini/settings.json` (global) or `.gemini/settings.json` (project), or `gemini mcp add` CLI |
 | Antigravity | `~/.gemini/config/mcp_config.json` (global) or `.agents/mcp_config.json` (workspace) |
 
@@ -98,6 +101,8 @@ Note: OpenCode v1 nests servers directly under `mcp` without the `servers` key.
 claude mcp add browser -- bun run <path-to-repo>/mcp-server/src/index.ts
 ```
 
+(Add `--scope project` to write to `.mcp.json` instead of the default local scope.)
+
 or via `.mcp.json`:
 
 ```json
@@ -126,16 +131,29 @@ or via `.mcp.json`:
 ```
 
 File locations per client:
-- **Claude Desktop:** `claude_desktop_config.json` (`%APPDATA%\Claude\` on Windows, `~/Library/Application Support/Claude/` on macOS) — restart the app after editing.
-- **Cursor:** `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (global).
-- **Windsurf:** `~/.codeium/windsurf/mcp_config.json` (global only).
+- **Claude Desktop:** `claude_desktop_config.json` (`%APPDATA%\Claude\` on Windows, `~/Library/Application Support/Claude/` on macOS, `~/.config/Claude/` on Linux) — restart the app after editing.
+- **Cursor:** `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (global) — restart Cursor and enable the server under *Settings → Tools & MCP*. (Cursor's schema documents an optional `"type": "stdio"` field; the shape above works as-is.)
+- **Windsurf:** `~/.config/devin/mcp_config.json` on macOS/Linux (`%APPDATA%\devin\mcp_config.json` on Windows), editable via *Cascade panel → ⋯ → Open MCP config file* (global only — no project-scope file). Older installs may still use the legacy `~/.codeium/windsurf/mcp_config.json` path.
 - **Gemini CLI:** `~/.gemini/settings.json` (global) or `.gemini/settings.json` (project) — or via CLI:
   ```powershell
-  gemini mcp add -s user browser bun -- run <path-to-repo>/mcp-server/src/index.ts
+  gemini mcp add -s user browser bun run <path-to-repo>/mcp-server/src/index.ts
   ```
 - **Antigravity:** `~/.gemini/config/mcp_config.json` (global) or `.agents/mcp_config.json` (workspace) — also editable via *Agent panel → ⋯ → MCP Servers → Manage MCP Servers → View raw config*. The same file is picked up by the Antigravity CLI (`agy`).
 
-**VS Code** (`.vscode/mcp.json`):
+**VS Code** (portable `.mcp.json` at workspace root, recommended):
+
+```json
+{
+  "mcpServers": {
+    "browser": {
+      "command": "bun",
+      "args": ["run", "<path-to-repo>/mcp-server/src/index.ts"]
+    }
+  }
+}
+```
+
+Alternatively, the legacy VS Code format (`.vscode/mcp.json`) uses a `servers` key with an explicit type:
 
 ```json
 {
@@ -148,8 +166,6 @@ File locations per client:
   }
 }
 ```
-
-Note: VS Code also reads the portable `.mcp.json` (`mcpServers` format) at the workspace root.
 
 **Any other stdio-capable client:** command `bun`, args
 `["run", "<path-to-repo>/mcp-server/src/index.ts"]`, optional env
