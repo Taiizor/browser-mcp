@@ -68,9 +68,13 @@ export class ExtensionBridge {
       });
       ws.on("error", (e) => console.error(`[bridge] ws error`, e));
     });
-    this.wss.on("error", (e) =>
-      console.error(`[bridge] wss error`, e)
-    );
+    this.wss.on("error", (e) => {
+      console.error(`[bridge] wss error`, e);
+      // A server that cannot bind its port is useless (and would linger as a
+      // zombie holding no browser connection). Exit so the MCP client restarts us.
+      const code = (e as { code?: string })?.code;
+      if (code === "EADDRINUSE") process.exit(1);
+    });
     this.wss.on("listening", () =>
       console.error(`[bridge] ws listening on ws://127.0.0.1:${port}`)
     );
