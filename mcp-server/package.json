@@ -1,0 +1,21 @@
+{
+  "name": "browser-mcp-server",
+  "version": "0.3.0",
+  "description": "Chromium extension bridge MCP server - full browser automation (tabs, DOM, network, console)",
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "dev": "bun --watch run src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "ws": "^8.22.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/ws": "^8.18.2",
+    "typescript": "^7.0.2"
+  }
+}

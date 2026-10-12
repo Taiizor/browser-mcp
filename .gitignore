@@ -1,0 +1,49 @@
+# Node.js
+node_modules/
+.next/
+.bun/
+out/
+.next/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+ehthumbs.db
+
+# Docker volumes
+docker-data/
+
+# Coverage reports
+coverage/
+*.out
+*.coverprofile
+lcov.info
+.nyc_output/
+
+# Temporary files
+tmp/
+*.tmp
+*.log
+*.pid
+bun.lock
+package-lock.json
+.playwright-mcp/
+#.claude/worktrees/
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# Credentials & Sessions
+report-bot/accounts.json
+report-bot/reports-history.json
+
+
