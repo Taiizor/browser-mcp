@@ -90,3 +90,44 @@ New-StoreShot (Join-Path $Here 'popup-recent-commands.png') 'Full transparency.'
   'Per-command status',
   'One-click clear'
 ) (Join-Path $Here 'store-2-auditlog.png')
+
+# GitHub social preview (1280x640, upload via repo Settings > Social preview)
+$SW = 1280; $SH = 640
+$sbmp = New-Object System.Drawing.Bitmap($SW, $SH)
+$sg = [System.Drawing.Graphics]::FromImage($sbmp)
+try {
+  $sg.Clear([System.Drawing.Color]::FromArgb(19, 19, 22))
+  $sg.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+  $sg.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAliasGridFit
+  $sicon = [System.Drawing.Image]::FromFile((Join-Path $Repo 'extension/icons/icon256.png'))
+  try {
+    $sg.DrawImage($sicon, 120, 192, 256, 256)
+  } finally { $sicon.Dispose() }
+  $swhite = [System.Drawing.Brushes]::White
+  $sgray = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(161, 161, 170))
+  $saccent = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(96, 165, 250))
+  try {
+    $sfTitle = New-Object System.Drawing.Font('Segoe UI', 72, [System.Drawing.FontStyle]::Bold)
+    $sfSub = New-Object System.Drawing.Font('Segoe UI', 30)
+    $sfSmall = New-Object System.Drawing.Font('Segoe UI', 24)
+    try {
+      $sg.DrawString('Browser MCP', $sfTitle, $swhite, 420, 190)
+      $sg.DrawString('Full-authority browser bridge for AI assistants', $sfSub, $sgray, 424, 310)
+      $sg.DrawString('111 MCP tools  ' + [char]0x2022 + '  Chromium MV3  ' + [char]0x2022 + '  MIT', $sfSmall, $saccent, 424, 380)
+    } finally {
+      $sfTitle.Dispose(); $sfSub.Dispose(); $sfSmall.Dispose()
+    }
+  } finally {
+    $sgray.Dispose(); $saccent.Dispose()
+  }
+} finally { $sg.Dispose() }
+$SocialOut = Join-Path $Here 'social-preview-1280x640.png'
+$sbmp.Save($SocialOut, [System.Drawing.Imaging.ImageFormat]::Png)
+$sbmp.Dispose()
+$scheck = [System.Drawing.Image]::FromFile($SocialOut)
+try {
+  if ($scheck.Width -ne 1280 -or $scheck.Height -ne 640) {
+    throw "Unexpected dimensions for $SocialOut : $($scheck.Width)x$($scheck.Height)"
+  }
+  Write-Host "saved $SocialOut ($($scheck.Width)x$($scheck.Height))"
+} finally { $scheck.Dispose() }
