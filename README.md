@@ -71,11 +71,16 @@ to `mcp-server/src/index.ts` and make sure `bun` is on your `PATH`.
   "mcp": {
     "browser": {
       "type": "local",
-      "command": ["bun", "run", "<path-to-repo>/mcp-server/src/index.ts"]
+      "command": ["bun", "run", "<path-to-repo>/mcp-server/src/index.ts"],
+      "environment": {
+        "BROWSER_MCP_PORT": "8765"
+      }
     }
   }
 }
 ```
+
+`environment` is optional — omit it to use the default port (`8765`). See [Custom Port Selection](#custom-port-selection).
 
 **Claude Code** — via CLI (recommended):
 
