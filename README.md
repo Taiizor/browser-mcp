@@ -46,9 +46,23 @@ bun run src/index.ts --port 9000
 3. Click the **Browser MCP** toolbar icon → you should see `Connected`.
 4. Configure or switch ports instantly in the popup footer if needed.
 
-### 3. OpenCode / Claude Desktop Configuration
+### 3. MCP Client Configuration
 
-`opencode.json`:
+The server runs over `stdio`, so any MCP-compatible client works. Use an **absolute path**
+to `mcp-server/src/index.ts` and make sure `bun` is on your `PATH`.
+(On Windows, use forward slashes or escaped backslashes in JSON.)
+
+| Client | Config file |
+|---|---|
+| OpenCode | `opencode.json` |
+| Claude Code | `.mcp.json` (project) or `claude mcp add` CLI |
+| Claude Desktop | `claude_desktop_config.json` |
+| Cursor | `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` |
+| Windsurf | `~/.codeium/windsurf/mcp_config.json` |
+| VS Code (Copilot) | `.vscode/mcp.json` |
+| Gemini CLI | `~/.gemini/settings.json` |
+
+**OpenCode** (`opencode.json`):
 
 ```json
 {
@@ -62,7 +76,55 @@ bun run src/index.ts --port 9000
 }
 ```
 
-For Claude Desktop (`claude_desktop_config.json`), place the command under `mcpServers.browser`.
+**Claude Code** — via CLI (recommended):
+
+```powershell
+claude mcp add browser -- bun run <path-to-repo>/mcp-server/src/index.ts
+```
+
+or via `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "browser": {
+      "command": "bun",
+      "args": ["run", "<path-to-repo>/mcp-server/src/index.ts"]
+    }
+  }
+}
+```
+
+**Claude Desktop / Cursor / Windsurf / Gemini CLI** (`mcpServers` format):
+
+```json
+{
+  "mcpServers": {
+    "browser": {
+      "command": "bun",
+      "args": ["run", "<path-to-repo>/mcp-server/src/index.ts"]
+    }
+  }
+}
+```
+
+**VS Code** (`.vscode/mcp.json`):
+
+```json
+{
+  "servers": {
+    "browser": {
+      "type": "stdio",
+      "command": "bun",
+      "args": ["run", "<path-to-repo>/mcp-server/src/index.ts"]
+    }
+  }
+}
+```
+
+**Any other stdio-capable client:** command `bun`, args
+`["run", "<path-to-repo>/mcp-server/src/index.ts"]`, optional env
+`BROWSER_MCP_PORT` for a custom bridge port.
 
 ### Custom Port Selection
 
