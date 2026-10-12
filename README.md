@@ -183,6 +183,10 @@ You can configure the WebSocket bridge port from **either** side:
 ## Permissions & UI (Extension Popup)
 
 The toolbar icon opens a zinc-dark panel:
+
+| Permissions | Recent Commands (Audit Log) |
+|---|---|
+| <img src="docs/screenshots/popup-permissions.png" width="300" alt="Permission toggles"> | <img src="docs/screenshots/popup-recent-commands.png" width="300" alt="Recent AI commands"> |
 - **Live Connection Badge:** Real-time bridge status (`Connected` / `No server`).
 - **Active Tab Bar:** Displays the currently focused tab title, URL, and Tab ID.
 - **Search & Filter:** Instant search across all permissions and category names.
