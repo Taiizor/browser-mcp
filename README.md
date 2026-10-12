@@ -118,7 +118,7 @@ File locations per client:
   ```powershell
   gemini mcp add -s user browser bun -- run <path-to-repo>/mcp-server/src/index.ts
   ```
-- **Antigravity:** `~/.gemini/config/mcp_config.json` (global) or `.agents/mcp_config.json` (workspace) — also editable via *Agent panel → ⋯ → MCP Servers → Manage MCP Servers → View raw config*.
+- **Antigravity:** `~/.gemini/config/mcp_config.json` (global) or `.agents/mcp_config.json` (workspace) — also editable via *Agent panel → ⋯ → MCP Servers → Manage MCP Servers → View raw config*. The same file is picked up by the Antigravity CLI (`agy`).
 
 **VS Code** (`.vscode/mcp.json`):
 
