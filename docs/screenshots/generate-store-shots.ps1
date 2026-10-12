@@ -56,7 +56,8 @@ function New-StoreShot($PopupFile, $Title, $Lines, $OutFile) {
         try {
           $g.DrawImage($icon, $x, 640, 64, 64)
         } finally { $icon.Dispose() }
-        $g.DrawString('Local-first  •  111 MCP tools  •  MIT', $fSmall, $gray, ($x + 80), 658)
+        $bullet = [char]0x2022
+        $g.DrawString(('Local-first  ' + $bullet + '  111 MCP tools  ' + $bullet + '  MIT'), $fSmall, $gray, ($x + 80), 658)
       } finally {
         $fTitle.Dispose(); $fSub.Dispose(); $fBody.Dispose(); $fSmall.Dispose()
       }
