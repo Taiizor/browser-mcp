@@ -2,8 +2,8 @@
 
 [![CI](https://github.com/Taiizor/browser-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/Taiizor/browser-mcp/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Bun](https://img.shields.io/badge/runtime-Bun-black?logo=bun)](https://bun.sh)
-[![Chrome MV3](https://img.shields.io/badge/extension-Chrome%20MV3-blue?logo=googlechrome)](extension/)
+[![Bun](https://img.shields.io/badge/Runtime-Bun-black?logo=bun)](https://bun.sh)
+[![Chrome MV3](https://img.shields.io/badge/Extension-Chrome%20MV3-blue?logo=googlechrome)](extension/)
 
 MCP server (`stdio`) + Chrome/Edge extension (`WebSocket`) with access to everything
 in the browser: clicking, typing, search, tab & window management, tab groups, network intercept/throttle,
