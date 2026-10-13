@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { ExtensionBridge } from "./bridge.js";
+import { BridgeClient, ExtensionBridge, type IBridge } from "./bridge.js";
 
 function parsePort(): number {
   const args = process.argv.slice(2);
@@ -27,7 +27,29 @@ function parsePort(): number {
 }
 
 const PORT = parsePort();
-const bridge = new ExtensionBridge(PORT);
+
+// Multi-agent sharing: the first process owns the WS bridge (primary),
+// later processes join it as satellite clients instead of failing on
+// EADDRINUSE. All satellites relay through the single extension socket.
+async function createBridge(port: number): Promise<IBridge> {
+  const primary = new ExtensionBridge(port, { exitOnAddrInUse: false });
+  try {
+    await primary.ready();
+    console.error(`[browser-mcp] primary bridge on :${port}`);
+    return primary;
+  } catch {
+    console.error(`[browser-mcp] port ${port} in use, joining as satellite client`);
+    try {
+      primary.close();
+    } catch {}
+    const client = new BridgeClient(port);
+    await client.ready();
+    console.error(`[browser-mcp] satellite connected to primary on :${port}`);
+    return client;
+  }
+}
+
+let bridge: IBridge;
 
 const server = new McpServer({
   name: "browser-mcp",
@@ -1502,12 +1524,15 @@ server.prompt(
 
 // ---------- start ----------
 async function main() {
+  bridge = await createBridge(PORT);
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error(`[browser-mcp] stdio ready, ws bridge on :${PORT}`);
 
   const shutdown = () => {
-    bridge.close();
+    try {
+      bridge.close();
+    } catch {}
     process.exit(0);
   };
   process.on("SIGINT", shutdown);

@@ -29,7 +29,25 @@ type Pending = {
   timer: Timer;
 };
 
-export class ExtensionBridge {
+export interface BridgeStatus {
+  connected: boolean;
+  wsPort: number;
+  consoleBuffered: number;
+  networkBuffered: number;
+}
+
+export interface IBridge {
+  readonly port: number;
+  readonly connected: boolean;
+  consoleEvents: Array<unknown>;
+  networkEvents: Array<unknown>;
+  send<T = unknown>(action: string, payload?: unknown, tabId?: number, timeoutMs?: number): Promise<T>;
+  launchBrowser(timeoutMs?: number): Promise<{ connected: boolean; launched: boolean; detail: string }>;
+  closeBrowser(force?: boolean): Promise<{ closed: boolean; detail: string }>;
+  close(): void;
+}
+
+export class ExtensionBridge implements IBridge {
   public readonly port: number;
   private wss: WebSocketServer;
   // Instead of a single socket: tell the extension socket apart via
@@ -38,14 +56,19 @@ export class ExtensionBridge {
   private extensionSocket: WebSocket | null = null;
   private pending = new Map<string, Pending>();
   private seq = 0;
+  private readyResolve: (() => void) | null = null;
+  private readyReject: ((e: Error) => void) | null = null;
+  private readySettled = false;
+  private exitOnAddrInUse: boolean;
 
   //-ring buffers for pushed events (so tools work even with polling)
   consoleEvents: Array<unknown> = [];
   networkEvents: Array<unknown> = [];
   private static MAX_BUF = 1000;
 
-  constructor(port: number) {
+  constructor(port: number, opts?: { exitOnAddrInUse?: boolean }) {
     this.port = port;
+    this.exitOnAddrInUse = opts?.exitOnAddrInUse ?? true;
     this.wss = new WebSocketServer({ port, host: "127.0.0.1", maxPayload: 10 * 1024 * 1024 });
     this.wss.on("connection", (ws, req) => {
       const origin = req.headers.origin;
@@ -71,13 +94,43 @@ export class ExtensionBridge {
     this.wss.on("error", (e) => {
       console.error(`[bridge] wss error`, e);
       // A server that cannot bind its port is useless (and would linger as a
-      // zombie holding no browser connection). Exit so the MCP client restarts us.
+      // zombie holding no browser connection). Exit so the MCP client restarts us,
+      // unless the caller wants to fall back to satellite (client) mode.
       const code = (e as { code?: string })?.code;
-      if (code === "EADDRINUSE") process.exit(1);
+      if (!this.readySettled) {
+        this.readySettled = true;
+        if (code === "EADDRINUSE" && !this.exitOnAddrInUse) {
+          this.readyReject?.(Object.assign(new Error(`Port ${port} already in use`), { code }));
+          return;
+        }
+        if (!(code === "EADDRINUSE")) {
+          this.readyReject?.(e as Error);
+        }
+      }
+      if (code === "EADDRINUSE" && this.exitOnAddrInUse) process.exit(1);
     });
-    this.wss.on("listening", () =>
-      console.error(`[bridge] ws listening on ws://127.0.0.1:${port}`)
-    );
+    this.wss.on("listening", () => {
+      console.error(`[bridge] ws listening on ws://127.0.0.1:${port}`);
+      if (!this.readySettled) {
+        this.readySettled = true;
+        this.readyResolve?.();
+      }
+    });
+  }
+
+  /** Resolves when the WS server is listening, rejects on bind failure. */
+  ready(): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      if (this.readySettled) {
+        // Already settled: check if we are actually listening.
+        const addr = this.wss.address();
+        if (addr) resolve();
+        else reject(new Error(`Bridge on :${this.port} failed to bind`));
+        return;
+      }
+      this.readyResolve = resolve;
+      this.readyReject = reject;
+    });
   }
 
   get connected(): boolean {
@@ -142,9 +195,44 @@ export class ExtensionBridge {
       }
       return;
     }
-    // External client command relay (e.g. from report-bot CLI or scripts)
+    // External client command relay (e.g. from report-bot CLI or scripts,
+    // and from satellite mcp-server instances sharing this bridge).
     if (ws !== this.extensionSocket && typeof msg.action === "string" && typeof msg.id === "string") {
-      this.send(msg.action as string, msg.payload, msg.tabId as number)
+      const action = msg.action as string;
+      const replyId = msg.id as string;
+      const reply = (ok: boolean, result?: unknown, error?: string) => {
+        try {
+          ws.send(JSON.stringify({ id: replyId, ok, result, error }));
+        } catch {}
+      };
+      // Satellite control plane: handled locally, never forwarded to the extension.
+      if (action === "__bridge_status") {
+        reply(true, {
+          connected: this.connected,
+          wsPort: this.port,
+          consoleBuffered: this.consoleEvents.length,
+          networkBuffered: this.networkEvents.length,
+        } satisfies BridgeStatus);
+        return;
+      }
+      if (action === "__launchBrowser") {
+        const timeoutMs = (msg.payload as { timeoutMs?: number } | undefined)?.timeoutMs;
+        this.launchBrowser(timeoutMs).then(
+          (result) => reply(true, result),
+          (err) => reply(false, undefined, (err as Error)?.message ?? String(err))
+        );
+        return;
+      }
+      if (action === "__closeBrowser") {
+        const force = (msg.payload as { force?: boolean } | undefined)?.force ?? false;
+        this.closeBrowser(force).then(
+          (result) => reply(true, result),
+          (err) => reply(false, undefined, (err as Error)?.message ?? String(err))
+        );
+        return;
+      }
+      Promise.resolve()
+        .then(() => this.send(msg.action as string, msg.payload, msg.tabId as number))
         .then((result) => {
           try {
             ws.send(JSON.stringify({ id: msg.id, ok: true, result }));
@@ -394,5 +482,210 @@ export class ExtensionBridge {
     try {
       this.wss.close();
     } catch {}
+  }
+}
+
+/**
+ * Satellite client for multi-agent sharing.
+ *
+ * When a second MCP server starts while the bridge port is already held,
+ * it joins the primary bridge as a WS client instead of binding its own
+ * server. Commands are relayed by the primary to the single extension
+ * connection, so N agents can share one browser.
+ */
+export class BridgeClient implements IBridge {
+  public readonly port: number;
+  consoleEvents: Array<unknown> = [];
+  networkEvents: Array<unknown> = [];
+  private ws: WebSocket | null = null;
+  private pending = new Map<string, Pending>();
+  private seq = 0;
+  private readyResolve: (() => void) | null = null;
+  private readyReject: ((e: Error) => void) | null = null;
+  private readySettled = false;
+  private statusTimer: Timer | null = null;
+  private reconnectTimer: Timer | null = null;
+  private closed = false;
+  private extensionConnected = true;
+
+  constructor(port: number) {
+    this.port = port;
+    this.connect();
+  }
+
+  ready(): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      if (this.readySettled) {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) resolve();
+        else reject(new Error(`Satellite bridge to :${this.port} is not connected`));
+        return;
+      }
+      this.readyResolve = resolve;
+      this.readyReject = reject;
+    });
+  }
+
+  get connected(): boolean {
+    return !!this.ws && this.ws.readyState === WebSocket.OPEN && this.extensionConnected;
+  }
+
+  /** Raw link state (ignores extension status) — used internally for polling. */
+  private get linkOpen(): boolean {
+    return !!this.ws && this.ws.readyState === WebSocket.OPEN;
+  }
+
+  private settleReady(err?: Error) {
+    if (this.readySettled) return;
+    this.readySettled = true;
+    if (err) this.readyReject?.(err);
+    else this.readyResolve?.();
+  }
+
+  private connect() {
+    if (this.closed) return;
+    let ws: WebSocket;
+    try {
+      ws = new WebSocket(`ws://127.0.0.1:${this.port}`, { maxPayload: 10 * 1024 * 1024 });
+    } catch (e) {
+      this.settleReady(e as Error);
+      this.scheduleReconnect();
+      return;
+    }
+    this.ws = ws;
+    ws.on("open", () => {
+      console.error(`[bridge] satellite connected to primary on :${this.port}`);
+      // Fetch real extension status before marking ready so `connected`
+      // is accurate from the start instead of optimistically true.
+      this.send<BridgeStatus>("__bridge_status", {}, undefined, 8000).then(
+        (s) => { this.extensionConnected = !!s?.connected; },
+        () => { /* keep default; link errors surface via close */ }
+      ).finally(() => {
+        this.settleReady();
+        this.startStatusPoll();
+      });
+    });
+    ws.on("message", (raw) => {
+      let msg: Record<string, unknown>;
+      try {
+        msg = JSON.parse(raw.toString());
+      } catch {
+        return;
+      }
+      if (typeof msg.id !== "string" || !this.pending.has(msg.id)) return;
+      const p = this.pending.get(msg.id)!;
+      this.pending.delete(msg.id);
+      clearTimeout(p.timer);
+      if ((msg as unknown as BridgeResponse).ok) {
+        p.resolve((msg as unknown as BridgeResponse).result);
+      } else {
+        p.reject(new Error(((msg as unknown as BridgeResponse).error as string) || "primary bridge error"));
+      }
+    });
+    const onDown = (e?: unknown) => {
+      if (this.ws === ws) this.ws = null;
+      if (!this.readySettled) {
+        this.settleReady((e as Error) ?? new Error(`Cannot reach primary bridge on :${this.port}`));
+      }
+      this.stopStatusPoll();
+      for (const [, p] of this.pending) {
+        clearTimeout(p.timer);
+        p.reject(new Error("Primary bridge disconnected"));
+      }
+      this.pending.clear();
+      this.scheduleReconnect();
+    };
+    ws.on("close", () => onDown(new Error(`Primary bridge on :${this.port} closed`)));
+    ws.on("error", (e) => {
+      console.error(`[bridge] satellite ws error`, e);
+      if (!this.readySettled) {
+        try { ws.close(); } catch {}
+        onDown(e);
+      }
+    });
+  }
+
+  private scheduleReconnect() {
+    if (this.closed || this.reconnectTimer) return;
+    // If the primary agent exited, keep retrying so a restarted primary
+    // is picked up without restarting every satellite.
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect();
+    }, 1500);
+  }
+
+  private startStatusPoll() {
+    this.stopStatusPoll();
+    const poll = () => {
+      if (this.closed || !this.linkOpen) return;
+      this.send<BridgeStatus>("__bridge_status", {}, undefined, 8000).then(
+        (s) => { this.extensionConnected = !!s?.connected; },
+        () => { /* keep last known value; link errors surface via close */ }
+      );
+    };
+    poll();
+    this.statusTimer = setInterval(poll, 3000);
+  }
+
+  private stopStatusPoll() {
+    if (this.statusTimer) {
+      clearInterval(this.statusTimer);
+      this.statusTimer = null;
+    }
+  }
+
+  send<T = unknown>(action: string, payload?: unknown, tabId?: number, timeoutMs = 30000): Promise<T> {
+    const ws = this.ws;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      return Promise.reject(new Error(`Primary bridge not connected (port ${this.port}). Start one agent first.`));
+    }
+    const id = `sat-${process.pid}-${Date.now()}-${this.seq++}`;
+    const req: BridgeRequest = { id, action, tabId, payload };
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`Primary bridge timed out (${action}, ${timeoutMs}ms)`));
+      }, timeoutMs);
+      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer });
+      try {
+        ws.send(JSON.stringify(req), (err) => {
+          if (err) {
+            this.pending.delete(id);
+            clearTimeout(timer);
+            reject(err);
+          }
+        });
+      } catch (e) {
+        this.pending.delete(id);
+        clearTimeout(timer);
+        reject(e as Error);
+      }
+    });
+  }
+
+  async launchBrowser(timeoutMs?: number): Promise<{ connected: boolean; launched: boolean; detail: string }> {
+    return this.send("__launchBrowser", { timeoutMs });
+  }
+
+  async closeBrowser(force = false): Promise<{ closed: boolean; detail: string }> {
+    return this.send("__closeBrowser", { force });
+  }
+
+  close(): void {
+    this.closed = true;
+    this.stopStatusPoll();
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    for (const [, p] of this.pending) {
+      clearTimeout(p.timer);
+      p.reject(new Error("Bridge closed"));
+    }
+    this.pending.clear();
+    try {
+      this.ws?.close();
+    } catch {}
+    this.ws = null;
   }
 }
