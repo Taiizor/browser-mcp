@@ -67,7 +67,7 @@ let bridge: IBridge;
 
 const server = new McpServer({
   name: "browser-mcp",
-  version: "0.3.1",
+  version: "0.3.2",
 });
 
 // ---------- helpers ----------
