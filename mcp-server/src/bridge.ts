@@ -479,6 +479,13 @@ export class ExtensionBridge implements IBridge {
       p.reject(new Error("Bridge closed"));
     }
     this.pending.clear();
+    // Drop satellite/observer sockets promptly so they fail over instead
+    // of lingering on a half-open connection.
+    try {
+      for (const client of this.wss.clients) {
+        try { (client as WebSocket).terminate(); } catch {}
+      }
+    } catch {}
     try {
       this.wss.close();
     } catch {}
@@ -495,9 +502,24 @@ export class ExtensionBridge implements IBridge {
  */
 export class BridgeClient implements IBridge {
   public readonly port: number;
-  consoleEvents: Array<unknown> = [];
-  networkEvents: Array<unknown> = [];
+  private localConsole: Array<unknown> = [];
+  private localNetwork: Array<unknown> = [];
+  get consoleEvents(): Array<unknown> {
+    return this.primary ? this.primary.consoleEvents : this.localConsole;
+  }
+  set consoleEvents(v: Array<unknown>) {
+    if (this.primary) this.primary.consoleEvents = v;
+    else this.localConsole = v;
+  }
+  get networkEvents(): Array<unknown> {
+    return this.primary ? this.primary.networkEvents : this.localNetwork;
+  }
+  set networkEvents(v: Array<unknown>) {
+    if (this.primary) this.primary.networkEvents = v;
+    else this.localNetwork = v;
+  }
   private ws: WebSocket | null = null;
+  private primary: ExtensionBridge | null = null;
   private pending = new Map<string, Pending>();
   private seq = 0;
   private readyResolve: (() => void) | null = null;
@@ -516,7 +538,7 @@ export class BridgeClient implements IBridge {
   ready(): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       if (this.readySettled) {
-        if (this.ws && this.ws.readyState === WebSocket.OPEN) resolve();
+        if (this.primary || (this.ws && this.ws.readyState === WebSocket.OPEN)) resolve();
         else reject(new Error(`Satellite bridge to :${this.port} is not connected`));
         return;
       }
@@ -526,6 +548,7 @@ export class BridgeClient implements IBridge {
   }
 
   get connected(): boolean {
+    if (this.primary) return this.primary.connected;
     return !!this.ws && this.ws.readyState === WebSocket.OPEN && this.extensionConnected;
   }
 
@@ -542,7 +565,7 @@ export class BridgeClient implements IBridge {
   }
 
   private connect() {
-    if (this.closed) return;
+    if (this.closed || this.primary) return;
     let ws: WebSocket;
     try {
       ws = new WebSocket(`ws://127.0.0.1:${this.port}`, { maxPayload: 10 * 1024 * 1024 });
@@ -583,6 +606,8 @@ export class BridgeClient implements IBridge {
     });
     const onDown = (e?: unknown) => {
       if (this.ws === ws) this.ws = null;
+      else return;
+      console.error(`[bridge] satellite link down on :${this.port}, failing over`);
       if (!this.readySettled) {
         this.settleReady((e as Error) ?? new Error(`Cannot reach primary bridge on :${this.port}`));
       }
@@ -592,7 +617,9 @@ export class BridgeClient implements IBridge {
         p.reject(new Error("Primary bridge disconnected"));
       }
       this.pending.clear();
-      this.scheduleReconnect();
+      // Primary may be gone: try to take over the port (promote), else
+      // fall back to client mode against whoever owns it now.
+      this.scheduleFailover();
     };
     ws.on("close", () => onDown(new Error(`Primary bridge on :${this.port} closed`)));
     ws.on("error", (e) => {
@@ -604,14 +631,50 @@ export class BridgeClient implements IBridge {
     });
   }
 
-  private scheduleReconnect() {
-    if (this.closed || this.reconnectTimer) return;
-    // If the primary agent exited, keep retrying so a restarted primary
-    // is picked up without restarting every satellite.
+  private scheduleFailover() {
+    if (this.closed || this.primary || this.reconnectTimer) return;
+    // Old primary may have exited: first try to bind the port ourselves
+    // (promote). If someone else owns it, rejoin as a client.
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
-      this.connect();
+      this.attemptPrimary();
     }, 1500);
+  }
+
+  private attemptPrimary() {
+    if (this.closed || this.primary) return;
+    console.error(`[bridge] satellite attempting takeover on :${this.port}`);
+    let candidate: ExtensionBridge;
+    try {
+      candidate = new ExtensionBridge(this.port, { exitOnAddrInUse: false });
+    } catch (e) {
+      console.error(`[bridge] takeover bind threw, rejoining as client`, e);
+      if (!this.closed) this.connect();
+      return;
+    }
+    candidate.ready().then(
+      () => {
+        if (this.closed) {
+          candidate.close();
+          return;
+        }
+        this.primary = candidate;
+        console.error(`[bridge] satellite promoted to primary on :${this.port}`);
+        try { this.ws?.close(); } catch {}
+        this.ws = null;
+        this.stopStatusPoll();
+      },
+      (e) => {
+        console.error(`[bridge] takeover failed (${(e as Error)?.message}), rejoining as client`);
+        try { candidate.close(); } catch {}
+        if (this.closed) return;
+        this.connect();
+      }
+    );
+  }
+
+  private scheduleReconnect() {
+    this.scheduleFailover();
   }
 
   private startStatusPoll() {
@@ -635,6 +698,7 @@ export class BridgeClient implements IBridge {
   }
 
   send<T = unknown>(action: string, payload?: unknown, tabId?: number, timeoutMs = 30000): Promise<T> {
+    if (this.primary) return this.primary.send<T>(action, payload, tabId, timeoutMs);
     const ws = this.ws;
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       return Promise.reject(new Error(`Primary bridge not connected (port ${this.port}). Start one agent first.`));
@@ -664,10 +728,12 @@ export class BridgeClient implements IBridge {
   }
 
   async launchBrowser(timeoutMs?: number): Promise<{ connected: boolean; launched: boolean; detail: string }> {
+    if (this.primary) return this.primary.launchBrowser(timeoutMs);
     return this.send("__launchBrowser", { timeoutMs });
   }
 
   async closeBrowser(force = false): Promise<{ closed: boolean; detail: string }> {
+    if (this.primary) return this.primary.closeBrowser(force);
     return this.send("__closeBrowser", { force });
   }
 
@@ -687,5 +753,11 @@ export class BridgeClient implements IBridge {
       this.ws?.close();
     } catch {}
     this.ws = null;
+    if (this.primary) {
+      try {
+        this.primary.close();
+      } catch {}
+      this.primary = null;
+    }
   }
 }
