@@ -71,7 +71,7 @@ const server = new McpServer({
 });
 
 // ---------- helpers ----------
-const TabId = z.number().int().optional().describe("Tab ID. Omit for the active tab.");
+const TabId = z.number().int().optional().describe("Tab ID from tab_list. Omit for the active tab.");
 const SelectorDesc = "CSS selector, XPath (prefix with xpath=...), or snapshot ref (ref=e12)";
 
 function textResult(obj: unknown): { content: { type: "text"; text: string }[] } {
@@ -96,6 +96,7 @@ server.tool("browser_status", "Check whether the browser extension is connected 
 // ---------- browser launch ----------
 server.tool(
   "browser_launch",
+  "Start the browser if needed and wait for the extension to connect. Browser choice follows BROWSER / sticky / running / OS-default order; use when browser_status shows disconnected.",
   {
     timeoutMs: z.number().optional().describe("How long to wait for the extension (default 45000)"),
   },
@@ -107,6 +108,7 @@ server.tool(
 
 server.tool(
   "browser_close",
+  "Close the browser. Graceful mode closes windows via the extension; force kills the process (also works when the extension is silent). Respects the browser_close popup switch.",
   {
     force: z.boolean().optional().describe("true: kill the browser process (also works when the extension is silent)"),
   },
@@ -124,14 +126,18 @@ server.tool(
 );
 
 // ---------- tabs ----------
-server.tool("tab_list", {}, async () => {
+server.tool("tab_list", "List all open tabs with id, title, URL and active state. Call first to discover tab IDs for other tools.", {}, async () => {
   const r = await bridge.send("tabs_list");
   return textResult(r);
 });
 
 server.tool(
   "tab_create",
-  { url: z.string().optional(), active: z.boolean().optional() },
+  "Open a new tab, optionally at a URL. Use active:false to keep it in the background. Returns the new tab ID.",
+  {
+    url: z.string().optional().describe("URL to open (default about:blank)"),
+    active: z.boolean().optional().describe("Bring to front (default true)"),
+  },
   async ({ url, active }) => {
     const r = await bridge.send("tab_create", { url, active });
     return textResult(r);
@@ -148,18 +154,19 @@ server.tool(
   }
 );
 
-server.tool("tab_close", { tabId: TabId }, async ({ tabId }) => {
+server.tool("tab_close", "Close a tab (default: active). Closing the last tab of the last window quits the browser and needs the browser_close permission.", { tabId: TabId }, async ({ tabId }) => {
   const r = await bridge.send("tab_close", {}, tabId);
   return textResult(r);
 });
 
-server.tool("tab_activate", { tabId: z.number().int() }, async ({ tabId }) => {
+server.tool("tab_activate", "Bring a tab to the front and focus its window.", { tabId: z.number().int().describe("Tab ID to activate (see tab_list)") }, async ({ tabId }) => {
   const r = await bridge.send("tab_activate", {}, tabId);
   return textResult(r);
 });
 
 server.tool(
   "tab_navigate",
+  "Navigate a tab to a URL. Navigation destroys page context: re-query refs and re-wait afterwards.",
   { url: z.string().describe("Target URL"), tabId: TabId },
   async ({ url, tabId }) => {
     const r = await bridge.send("tab_navigate", { url }, tabId);
@@ -167,17 +174,17 @@ server.tool(
   }
 );
 
-server.tool("tab_reload", { tabId: TabId }, async ({ tabId }) => {
+server.tool("tab_reload", "Reload a tab (default: active). Page context resets: re-query refs afterwards.", { tabId: TabId }, async ({ tabId }) => {
   const r = await bridge.send("tab_reload", {}, tabId);
   return textResult(r);
 });
 
-server.tool("tab_back", { tabId: TabId }, async ({ tabId }) => {
+server.tool("tab_back", "Go back in tab history.", { tabId: TabId }, async ({ tabId }) => {
   const r = await bridge.send("tab_back", {}, tabId);
   return textResult(r);
 });
 
-server.tool("tab_forward", { tabId: TabId }, async ({ tabId }) => {
+server.tool("tab_forward", "Go forward in tab history.", { tabId: TabId }, async ({ tabId }) => {
   const r = await bridge.send("tab_forward", {}, tabId);
   return textResult(r);
 });
@@ -185,6 +192,7 @@ server.tool("tab_forward", { tabId: TabId }, async ({ tabId }) => {
 // ---------- page / dom ----------
 server.tool(
   "page_snapshot",
+  "Compact element tree with refs (ref=e1) for finding selectors. Start here before interacting; refs expire on navigation.",
   {
     tabId: TabId,
     compact: z.boolean().optional().describe("true: compact tree, false: detailed"),
@@ -195,18 +203,19 @@ server.tool(
   }
 );
 
-server.tool("page_html", { tabId: TabId }, async ({ tabId }) => {
+server.tool("page_html", "Full HTML source (large, truncated in display). Prefer page_snapshot for structure.", { tabId: TabId }, async ({ tabId }) => {
   const r = await bridge.send("page_html", {}, tabId, 60000);
   return textResult(r);
 });
 
-server.tool("page_text", { tabId: TabId }, async ({ tabId }) => {
+server.tool("page_text", "Visible page text (up to 100KB). Best for reading content.", { tabId: TabId }, async ({ tabId }) => {
   const r = await bridge.send("page_text", {}, tabId);
   return textResult(r);
 });
 
 server.tool(
   "dom_query",
+  "Find elements by CSS/XPath/text/ref. Returns refs with tag, text and coordinates for clicks and typing.",
   { selector: z.string().describe(SelectorDesc), tabId: TabId },
   async ({ selector, tabId }) => {
     const r = await bridge.send("dom_query", { selector }, tabId);
@@ -216,11 +225,12 @@ server.tool(
 
 server.tool(
   "dom_click",
+  "Click an element (synthetic mouse events). For bot-protected sites use trusted_click instead.",
   {
     selector: z.string().describe(SelectorDesc),
     tabId: TabId,
-    button: z.enum(["left", "right", "middle"]).optional(),
-    doubleClick: z.boolean().optional(),
+    button: z.enum(["left", "right", "middle"]).optional().describe("Mouse button (default left)"),
+    doubleClick: z.boolean().optional().describe("Fire dblclick instead of click"),
   },
   async ({ selector, tabId, button, doubleClick }) => {
     const r = await bridge.send("dom_click", { selector, button, doubleClick }, tabId);
@@ -230,12 +240,13 @@ server.tool(
 
 server.tool(
   "dom_type",
+  "Type text into an input with realistic key events. For many fields at once use dom_fill.",
   {
     selector: z.string().describe(SelectorDesc),
-    text: z.string(),
+    text: z.string().describe("Text to type"),
     tabId: TabId,
-    clearFirst: z.boolean().optional(),
-    pressEnter: z.boolean().optional(),
+    clearFirst: z.boolean().optional().describe("Clear existing content first"),
+    pressEnter: z.boolean().optional().describe("Press Enter after typing"),
     delayMs: z.number().optional().describe("Per-keystroke delay (for bot-protected sites)"),
   },
   async ({ selector, text, tabId, clearFirst, pressEnter, delayMs }) => {
@@ -250,10 +261,11 @@ server.tool(
 
 server.tool(
   "dom_fill",
+  "Fill many form fields at once (selector -> value map). Faster than repeated dom_type.",
   {
     fields: z.record(z.string(), z.string()).describe("selector -> value map"),
     tabId: TabId,
-    submit: z.boolean().optional(),
+    submit: z.boolean().optional().describe("Submit the enclosing form after filling"),
   },
   async ({ fields, tabId, submit }) => {
     const r = await bridge.send("dom_fill", { fields, submit }, tabId);
@@ -263,7 +275,12 @@ server.tool(
 
 server.tool(
   "dom_select",
-  { selector: z.string(), value: z.string(), tabId: TabId },
+  "Choose a <select> option by its value (fires input/change).",
+  {
+    selector: z.string().describe(SelectorDesc),
+    value: z.string().describe("Option value to select"),
+    tabId: TabId,
+  },
   async ({ selector, value, tabId }) => {
     const r = await bridge.send("dom_select", { selector, value }, tabId);
     return textResult(r);
@@ -272,8 +289,9 @@ server.tool(
 
 server.tool(
   "dom_check",
+  "Set or toggle a checkbox/radio (fires input/change, no synthetic click).",
   {
-    selector: z.string(),
+    selector: z.string().describe(SelectorDesc),
     checked: z.boolean().optional().describe("Omit to toggle"),
     tabId: TabId,
   },
@@ -285,6 +303,7 @@ server.tool(
 
 server.tool(
   "dom_hover",
+  "Hover an element (opens menus/tooltips). For real pointer input use trusted actions.",
   { selector: z.string().describe(SelectorDesc), tabId: TabId },
   async ({ selector, tabId }) => {
     const r = await bridge.send("dom_hover", { selector }, tabId);
@@ -294,6 +313,7 @@ server.tool(
 
 server.tool(
   "dom_focus",
+  "Focus an element (inputs, buttons).",
   { selector: z.string().describe(SelectorDesc), tabId: TabId },
   async ({ selector, tabId }) => {
     const r = await bridge.send("dom_focus", { selector }, tabId);
@@ -303,10 +323,11 @@ server.tool(
 
 server.tool(
   "dom_scroll",
+  "Scroll the page or an element into view.",
   {
     selector: z.string().optional().describe("Omit to scroll the page"),
-    direction: z.enum(["up", "down", "top", "bottom"]).optional(),
-    pixels: z.number().optional(),
+    direction: z.enum(["up", "down", "top", "bottom"]).optional().describe("Scroll direction (default down)"),
+    pixels: z.number().optional().describe("Pixels per step (default 500)"),
     tabId: TabId,
   },
   async (args) => {
@@ -318,6 +339,7 @@ server.tool(
 
 server.tool(
   "dom_drag",
+  "Drag from one element to another (synthetic mouse + HTML5 drag events).",
   {
     from: z.string().describe("Source selector/ref"),
     to: z.string().describe("Target selector/ref"),
@@ -331,6 +353,7 @@ server.tool(
 
 server.tool(
   "keyboard_press",
+  "Send a key press to the focused element. Supports combos like Ctrl+C.",
   {
     key: z.string().describe("Enter, Tab, Escape, ArrowDown, a, A, Ctrl+C ..."),
     tabId: TabId,
@@ -343,7 +366,8 @@ server.tool(
 
 server.tool(
   "page_find",
-  { text: z.string(), tabId: TabId },
+  "Search page text (case-insensitive), scroll to and highlight the first match.",
+  { text: z.string().describe("Text to find"), tabId: TabId },
   async ({ text, tabId }) => {
     const r = await bridge.send("page_find", { text }, tabId);
     return textResult(r);
@@ -405,7 +429,7 @@ server.tool(
   }
 );
 
-server.tool("page_pdf", { tabId: TabId }, async ({ tabId }) => {
+server.tool("page_pdf", "Render the tab to PDF (base64). Slower; for visuals prefer page_screenshot.", { tabId: TabId }, async ({ tabId }) => {
   const r = await bridge.send("page_pdf", {}, tabId, 60000);
   return textResult(r);
 });
@@ -413,10 +437,11 @@ server.tool("page_pdf", { tabId: TabId }, async ({ tabId }) => {
 // ---------- js / console ----------
 server.tool(
   "js_evaluate",
+  "Run JavaScript in the page via CDP (bypasses page CSP). Supports `return` statements and top-level await (with awaitPromise). Values must be JSON-serializable.",
   {
-    expression: z.string().describe("JS to run in the page. return is supported."),
+    expression: z.string().describe("JS to run: bare expression (2+2) or statements with return. Top-level await needs awaitPromise:true."),
     tabId: TabId,
-    awaitPromise: z.boolean().optional(),
+    awaitPromise: z.boolean().optional().describe("Await promises/top-level await before returning"),
   },
   async ({ expression, tabId, awaitPromise }) => {
     try {
@@ -464,9 +489,10 @@ server.tool(
 
 server.tool(
   "console_get",
+  "Read captured page console logs (filter by level). Falls back to the local bridge buffer when the extension is unreachable.",
   {
-    level: z.enum(["all", "log", "info", "warn", "error", "debug"]).optional(),
-    limit: z.number().optional(),
+    level: z.enum(["all", "log", "info", "warn", "error", "debug"]).optional().describe("Log level filter (default all)"),
+    limit: z.number().optional().describe("Max entries from the tail (default 200)"),
     tabId: TabId,
   },
   async ({ level, limit, tabId }) => {
@@ -487,7 +513,7 @@ server.tool(
   }
 );
 
-server.tool("console_clear", {}, async () => {
+server.tool("console_clear", "Clear captured console logs (extension + local buffer).", {}, async () => {
   try {
     const r = await bridge.send("console_clear", {});
     return textResult(r);
@@ -528,7 +554,7 @@ server.tool(
   }
 );
 
-server.tool("network_clear", {}, async () => {
+server.tool("network_clear", "Clear captured network logs (extension + local buffer).", {}, async () => {
   try {
     const r = await bridge.send("network_clear", {});
     return textResult(r);
@@ -540,6 +566,7 @@ server.tool("network_clear", {}, async () => {
 
 server.tool(
   "network_response_body",
+  "Re-fetch a recorded request's body in page context (webRequest exposes no bodies). Needs a requestId from network_requests.",
   {
     requestId: z.string().describe("requestId from network_requests"),
     tabId: TabId,
@@ -743,8 +770,9 @@ server.tool(
 // ---------- storage ----------
 server.tool(
   "storage_get",
+  "Read all localStorage/sessionStorage entries of the page (values truncated).",
   {
-    area: z.enum(["local", "session"]).optional(),
+    area: z.enum(["local", "session"]).optional().describe("Storage area (default local)"),
     tabId: TabId,
   },
   async ({ area, tabId }) => {
@@ -754,10 +782,11 @@ server.tool(
 );
 server.tool(
   "storage_set",
+  "Write one storage entry (string values only).",
   {
-    key: z.string(),
-    value: z.string(),
-    area: z.enum(["local", "session"]).optional(),
+    key: z.string().describe("Storage key"),
+    value: z.string().describe("String value to store"),
+    area: z.enum(["local", "session"]).optional().describe("Storage area (default local)"),
     tabId: TabId,
   },
   async ({ key, value, area, tabId }) => {
@@ -771,14 +800,15 @@ server.tool(
 );
 
 // ---------- IndexedDB ----------
-server.tool("idb_list", { tabId: TabId }, async ({ tabId }) => {
+server.tool("idb_list", "List IndexedDB databases on the page (name + version).", { tabId: TabId }, async ({ tabId }) => {
   const r = await bridge.send("idb_list", {}, tabId);
   return textResult(r);
 });
 
 server.tool(
   "idb_stores",
-  { db: z.string(), tabId: TabId },
+  "List object stores of an IndexedDB database.",
+  { db: z.string().describe("Database name (see idb_list)"), tabId: TabId },
   async ({ db, tabId }) => {
     const r = await bridge.send("idb_stores", { db }, tabId);
     return textResult(r);
@@ -787,10 +817,11 @@ server.tool(
 
 server.tool(
   "idb_read",
+  "Read IndexedDB rows (values truncated for AI readability).",
   {
-    db: z.string(),
-    store: z.string(),
-    limit: z.number().optional(),
+    db: z.string().describe("Database name (see idb_list)"),
+    store: z.string().describe("Object store name (see idb_stores)"),
+    limit: z.number().optional().describe("Max rows when reading all (default 50)"),
     key: z.unknown().optional().describe("Omit to read all (up to limit)"),
     tabId: TabId,
   },
@@ -803,7 +834,12 @@ server.tool(
 
 server.tool(
   "idb_count",
-  { db: z.string(), store: z.string(), tabId: TabId },
+  "Count rows in an IndexedDB object store.",
+  {
+    db: z.string().describe("Database name (see idb_list)"),
+    store: z.string().describe("Object store name (see idb_stores)"),
+    tabId: TabId,
+  },
   async ({ db, store, tabId }) => {
     const r = await bridge.send("idb_count", { db, store }, tabId);
     return textResult(r);
@@ -812,11 +848,12 @@ server.tool(
 
 server.tool(
   "idb_put",
+  "Insert or update an IndexedDB row (returns the key).",
   {
-    db: z.string(),
-    store: z.string(),
-    value: z.unknown(),
-    key: z.unknown().optional(),
+    db: z.string().describe("Database name (see idb_list)"),
+    store: z.string().describe("Object store name (see idb_stores)"),
+    value: z.unknown().describe("Row value to store"),
+    key: z.unknown().optional().describe("Key (omit for auto-keyed stores)"),
     tabId: TabId,
   },
   async (args) => {
@@ -828,10 +865,11 @@ server.tool(
 
 server.tool(
   "idb_delete",
+  "Delete one IndexedDB row by key.",
   {
-    db: z.string(),
-    store: z.string(),
-    key: z.unknown(),
+    db: z.string().describe("Database name (see idb_list)"),
+    store: z.string().describe("Object store name (see idb_stores)"),
+    key: z.unknown().describe("Key of the row to delete"),
     tabId: TabId,
   },
   async (args) => {
@@ -843,7 +881,12 @@ server.tool(
 
 server.tool(
   "idb_clear",
-  { db: z.string(), store: z.string(), tabId: TabId },
+  "Delete ALL rows in an IndexedDB object store (destructive).",
+  {
+    db: z.string().describe("Database name (see idb_list)"),
+    store: z.string().describe("Object store name (see idb_stores)"),
+    tabId: TabId,
+  },
   async ({ db, store, tabId }) => {
     const r = await bridge.send("idb_clear", { db, store }, tabId);
     return textResult(r);
@@ -853,7 +896,11 @@ server.tool(
 // ---------- history ----------
 server.tool(
   "history_search",
-  { query: z.string(), limit: z.number().optional() },
+  "Search browser history by query text.",
+  {
+    query: z.string().describe("Search text"),
+    limit: z.number().optional().describe("Max results (default 20)"),
+  },
   async ({ query, limit }) => {
     const r = await bridge.send("history_search", { query, limit: limit ?? 20 });
     return textResult(r);
@@ -876,18 +923,19 @@ server.tool(
 );
 
 // ---------- network mock / block (debugger Fetch domain) ----------
-server.tool("network_mock_start", { tabId: TabId }, async ({ tabId }) => {
+server.tool("network_mock_start", "Attach the debugger and start intercepting requests. Spy mode: without routes, unmatched traffic passes through while bodies are recorded.", { tabId: TabId }, async ({ tabId }) => {
   const r = await bridge.send("network_mock_start", {}, tabId);
   return textResult(r);
 });
 
-server.tool("network_mock_stop", { tabId: TabId }, async ({ tabId }) => {
+server.tool("network_mock_stop", "Detach the debugger and end interception for the tab.", { tabId: TabId }, async ({ tabId }) => {
   const r = await bridge.send("network_mock_stop", {}, tabId);
   return textResult(r);
 });
 
 server.tool(
   "network_mock_route",
+  "Add a block/fulfill/delay rule for matching URLs. Requires network_mock_start first.",
   {
     pattern: z.string().describe("URL pattern, * wildcard (e.g. *ads* or https://api.example.com/*)"),
     action: z.enum(["block", "fulfill", "delay"]).describe("block: drop, fulfill: return a mock response, delay: hold then pass through"),
@@ -908,21 +956,22 @@ server.tool(
   }
 );
 
-server.tool("network_mock_list", { tabId: TabId }, async ({ tabId }) => {
+server.tool("network_mock_list", "List active mock routes and session state.", { tabId: TabId }, async ({ tabId }) => {
   const r = await bridge.send("network_mock_list", {}, tabId);
   return textResult(r);
 });
 
 server.tool(
   "network_mock_remove",
-  { routeId: z.string(), tabId: TabId },
+  "Remove one mock route by ID.",
+  { routeId: z.string().describe("Route ID from network_mock_list"), tabId: TabId },
   async ({ routeId, tabId }) => {
     const r = await bridge.send("network_mock_remove", { routeId }, tabId);
     return textResult(r);
   }
 );
 
-server.tool("network_mock_clear", { tabId: TabId }, async ({ tabId }) => {
+server.tool("network_mock_clear", "Remove all mock routes (keeps the interception session attached).", { tabId: TabId }, async ({ tabId }) => {
   const r = await bridge.send("network_mock_clear", {}, tabId);
   return textResult(r);
 });
@@ -930,41 +979,43 @@ server.tool("network_mock_clear", { tabId: TabId }, async ({ tabId }) => {
 // ---------- downloads ----------
 server.tool(
   "downloads_list",
-  { limit: z.number().optional() },
+  "List recent downloads with state, progress and errors.",
+  { limit: z.number().optional().describe("Max entries (default 50)") },
   async ({ limit }) => {
     const r = await bridge.send("downloads_list", { limit: limit ?? 50 });
     return textResult(r);
   }
 );
 
-server.tool("downloads_pause", { id: z.number().int() }, async ({ id }) => {
+server.tool("downloads_pause", "Pause an in-progress download.", { id: z.number().int().describe("Download ID from downloads_list") }, async ({ id }) => {
   const r = await bridge.send("downloads_pause", { id });
   return textResult(r);
 });
 
-server.tool("downloads_resume", { id: z.number().int() }, async ({ id }) => {
+server.tool("downloads_resume", "Resume a paused download.", { id: z.number().int().describe("Download ID from downloads_list") }, async ({ id }) => {
   const r = await bridge.send("downloads_resume", { id });
   return textResult(r);
 });
 
-server.tool("downloads_cancel", { id: z.number().int() }, async ({ id }) => {
+server.tool("downloads_cancel", "Cancel an in-progress download.", { id: z.number().int().describe("Download ID from downloads_list") }, async ({ id }) => {
   const r = await bridge.send("downloads_cancel", { id });
   return textResult(r);
 });
 
-server.tool("downloads_erase", { id: z.number().int() }, async ({ id }) => {
+server.tool("downloads_erase", "Remove a finished download from history (keeps the file).", { id: z.number().int().describe("Download ID from downloads_list") }, async ({ id }) => {
   const r = await bridge.send("downloads_erase", { id });
   return textResult(r);
 });
 
 // ---------- bookmarks ----------
-server.tool("bookmarks_search", { query: z.string() }, async ({ query }) => {
+server.tool("bookmarks_search", "Search bookmarks by title/URL.", { query: z.string().describe("Search text") }, async ({ query }) => {
   const r = await bridge.send("bookmarks_search", { query });
   return textResult(r);
 });
 
 server.tool(
   "bookmarks_list",
+  "List bookmark children of a folder.",
   { parentId: z.string().optional().describe("Omit for the bookmarks bar") },
   async ({ parentId }) => {
     const r = await bridge.send("bookmarks_list", { parentId });
@@ -974,10 +1025,11 @@ server.tool(
 
 server.tool(
   "bookmarks_add",
+  "Create a bookmark (returns its ID).",
   {
-    title: z.string(),
-    url: z.string(),
-    parentId: z.string().optional(),
+    title: z.string().describe("Bookmark title"),
+    url: z.string().describe("Bookmark URL"),
+    parentId: z.string().optional().describe("Parent folder ID (omit for default location)"),
   },
   async (args) => {
     const r = await bridge.send("bookmarks_add", args);
@@ -985,7 +1037,7 @@ server.tool(
   }
 );
 
-server.tool("bookmarks_remove", { id: z.string() }, async ({ id }) => {
+server.tool("bookmarks_remove", "Delete a bookmark by ID.", { id: z.string().describe("Bookmark ID") }, async ({ id }) => {
   const r = await bridge.send("bookmarks_remove", { id });
   return textResult(r);
 });
@@ -993,6 +1045,7 @@ server.tool("bookmarks_remove", { id: z.string() }, async ({ id }) => {
 // ---------- file upload ----------
 server.tool(
   "dom_upload",
+  "Upload local files into an <input type=file> via CDP (fires input/change).",
   {
     selector: z.string().describe("selector/ref for the file input"),
     filePaths: z.array(z.string()).describe("Local file paths to upload"),
@@ -1007,6 +1060,7 @@ server.tool(
 // ---------- dialogs ----------
 server.tool(
   "dialog_policy",
+  "Set auto-handling for JS dialogs: alert is swallowed, confirm/prompt auto-answered.",
   {
     accept: z.boolean().optional().describe("Auto-accept confirm/prompt"),
     promptText: z.string().optional().describe("Response text for prompt"),
@@ -1018,12 +1072,12 @@ server.tool(
   }
 );
 
-server.tool("dialog_get", { limit: z.number().optional() }, async ({ limit }) => {
+server.tool("dialog_get", "List captured dialogs (alert/confirm/prompt) with messages and responses. Capture is async: poll briefly after triggering.", { limit: z.number().optional().describe("Max entries (default 50)") }, async ({ limit }) => {
   const r = await bridge.send("dialog_get", { limit: limit ?? 50 });
   return textResult(r);
 });
 
-server.tool("dialog_clear", {}, async () => {
+server.tool("dialog_clear", "Clear captured dialog history.", {}, async () => {
   const r = await bridge.send("dialog_clear", {});
   return textResult(r);
 });
@@ -1031,7 +1085,8 @@ server.tool("dialog_clear", {}, async () => {
 // ---------- HAR ----------
 server.tool(
   "har_export",
-  { tabId: TabId, limit: z.number().optional() },
+  "Export captured traffic for a tab as HAR 1.2 (headers included, no bodies).",
+  { tabId: TabId, limit: z.number().optional().describe("Max entries (default 300)") },
   async ({ tabId, limit }) => {
     const r = await bridge.send("har_export", { limit: limit ?? 300 }, tabId, 60000);
     return textResult(r);
@@ -1039,13 +1094,14 @@ server.tool(
 );
 
 // ---------- frames (iframe targeting) ----------
-server.tool("frame_list", { tabId: TabId }, async ({ tabId }) => {
+server.tool("frame_list", "List frames/iframes of a tab with URLs (for frame_focus targeting).", { tabId: TabId }, async ({ tabId }) => {
   const r = await bridge.send("frame_list", {}, tabId);
   return textResult(r);
 });
 
 server.tool(
   "frame_focus",
+  "Route later DOM/page commands to the iframe whose URL contains this string.",
   {
     frameUrl: z.string().describe("URL substring of the target frame (from frame_list). Later DOM/page commands go to that frame."),
     tabId: TabId,
@@ -1056,7 +1112,7 @@ server.tool(
   }
 );
 
-server.tool("frame_clear", { tabId: TabId }, async ({ tabId }) => {
+server.tool("frame_clear", "Clear iframe targeting (commands go to the main frame again).", { tabId: TabId }, async ({ tabId }) => {
   const r = await bridge.send("frame_clear", {}, tabId);
   return textResult(r);
 });
@@ -1064,6 +1120,7 @@ server.tool("frame_clear", { tabId: TabId }, async ({ tabId }) => {
 // ---------- tabs + windows ----------
 server.tool(
   "tab_pin",
+  "Pin/unpin a tab (omit to toggle).",
   { pinned: z.boolean().optional().describe("Omit to toggle"), tabId: TabId },
   async ({ pinned, tabId }) => {
     const r = await bridge.send("tab_pin", { pinned }, tabId);
@@ -1073,6 +1130,7 @@ server.tool(
 
 server.tool(
   "tab_mute",
+  "Mute/unmute a tab (omit to toggle).",
   { muted: z.boolean().optional().describe("Omit to toggle"), tabId: TabId },
   async ({ muted, tabId }) => {
     const r = await bridge.send("tab_mute", { muted }, tabId);
@@ -1080,27 +1138,28 @@ server.tool(
   }
 );
 
-server.tool("window_list", {}, async () => {
+server.tool("window_list", "List windows with focus state and their tabs.", {}, async () => {
   const r = await bridge.send("window_list", {});
   return textResult(r);
 });
 
 server.tool(
   "window_create",
-  { url: z.string().optional() },
+  "Open a new window, optionally at a URL.",
+  { url: z.string().optional().describe("Initial URL (omit for blank page)") },
   async ({ url }) => {
     const r = await bridge.send("window_create", { url });
     return textResult(r);
   }
 );
 
-server.tool("window_focus", { windowId: z.number().int() }, async ({ windowId }) => {
+server.tool("window_focus", "Focus a window by ID.", { windowId: z.number().int().describe("Window ID from window_list") }, async ({ windowId }) => {
   const r = await bridge.send("window_focus", { windowId });
   return textResult(r);
 });
 
 // ---------- accessibility tree ----------
-server.tool("page_axtree", { tabId: TabId }, async ({ tabId }) => {
+server.tool("page_axtree", "Full accessibility tree (roles, names, values) for accessibility audits.", { tabId: TabId }, async ({ tabId }) => {
   const r = await bridge.send("page_axtree", {}, tabId, 60000);
   return textResult(r);
 });
@@ -1108,6 +1167,7 @@ server.tool("page_axtree", { tabId: TabId }, async ({ tabId }) => {
 // ---------- permissions + geolocation ----------
 server.tool(
   "permissions_grant",
+  "Allow/block a site permission (geolocation, camera...) for an origin via content settings.",
   {
     permission: z.enum(["geolocation", "notifications", "camera", "microphone", "popups", "javascript", "images", "cookies"]).describe("Permission type"),
     setting: z.enum(["allow", "block", "ask"]).optional().describe("Default allow"),
@@ -1123,10 +1183,11 @@ server.tool(
 
 server.tool(
   "emulation_geolocation",
+  "Spoof geolocation for a tab via CDP (attaches the debugger while active).",
   {
-    latitude: z.number(),
-    longitude: z.number(),
-    accuracy: z.number().optional(),
+    latitude: z.number().describe("Latitude in degrees"),
+    longitude: z.number().describe("Longitude in degrees"),
+    accuracy: z.number().optional().describe("Accuracy in meters (default 50)"),
     tabId: TabId,
   },
   async (args) => {
@@ -1136,28 +1197,29 @@ server.tool(
   }
 );
 
-server.tool("emulation_geolocation_clear", { tabId: TabId }, async ({ tabId }) => {
+server.tool("emulation_geolocation_clear", "Remove the geolocation override (detaches the debugger when idle).", { tabId: TabId }, async ({ tabId }) => {
   const r = await bridge.send("emulation_geolocation_clear", {}, tabId);
   return textResult(r);
 });
 
 // ---------- performance ----------
-server.tool("page_metrics", { tabId: TabId }, async ({ tabId }) => {
+server.tool("page_metrics", "Blink performance metrics: JS heap, layout counts, FPS-related timings.", { tabId: TabId }, async ({ tabId }) => {
   const r = await bridge.send("page_metrics", {}, tabId);
   return textResult(r);
 });
 
 // ---------- permissions ----------
-server.tool("permissions_list", {}, async () => {
+server.tool("permissions_list", "Show permission categories with enabled/total counts and the disabled action list.", {}, async () => {
   const r = await bridge.send("perm_list", {});
   return textResult(r);
 });
 
 server.tool(
   "permissions_set",
+  "Enable/disable one bridge action (synced to the extension popup). Disabled actions fail with a clear error.",
   {
     action: z.string().describe("Bridge action name (e.g. dom_click)"),
-    enabled: z.boolean(),
+    enabled: z.boolean().describe("true to enable, false to disable"),
   },
   async ({ action, enabled }) => {
     const r = await bridge.send("perm_set", { action, enabled });
@@ -1168,10 +1230,11 @@ server.tool(
 // ---------- trusted input (CDP Input.* — real OS-level events) ----------
 server.tool(
   "trusted_click",
+  "Real OS-level click via CDP Input (bypasses bot detection). Resolves the target with dom_query first.",
   {
     selector: z.string().describe(SelectorDesc),
-    button: z.enum(["left", "right", "middle"]).optional(),
-    doubleClick: z.boolean().optional(),
+    button: z.enum(["left", "right", "middle"]).optional().describe("Mouse button (default left)"),
+    doubleClick: z.boolean().optional().describe("Double-click instead of single click"),
     tabId: TabId,
   },
   async ({ selector, button, doubleClick, tabId }) => {
@@ -1182,11 +1245,12 @@ server.tool(
 
 server.tool(
   "trusted_type",
+  "Real keystrokes via CDP Input.insertText (bypasses bot detection). CSS selectors only.",
   {
     selector: z.string().describe("CSS selector or ref (XPath/text selectors are not supported here)"),
-    text: z.string(),
-    clearFirst: z.boolean().optional(),
-    pressEnter: z.boolean().optional(),
+    text: z.string().describe("Text to type"),
+    clearFirst: z.boolean().optional().describe("Clear existing content first"),
+    pressEnter: z.boolean().optional().describe("Press Enter after typing"),
     tabId: TabId,
   },
   async ({ selector, text, clearFirst, pressEnter, tabId }) => {
@@ -1197,6 +1261,7 @@ server.tool(
 
 server.tool(
   "trusted_key",
+  "Press a key as trusted CDP input (works without focus tricks).",
   {
     key: z.string().describe("Enter, Tab, Escape, Backspace, Delete, Arrows, Home, End, PageUp/Down, or a single character"),
     modifiers: z.number().optional().describe("Bitmask: alt=1, ctrl=2, meta=4, shift=8"),
@@ -1210,10 +1275,11 @@ server.tool(
 
 server.tool(
   "trusted_scroll",
+  "Trusted wheel scroll at a viewport point (defaults to center).",
   {
     x: z.number().optional().describe("Omit for viewport center"),
-    y: z.number().optional(),
-    deltaX: z.number().optional(),
+    y: z.number().optional().describe("Omit for viewport center"),
+    deltaX: z.number().optional().describe("Horizontal pixels (default 0)"),
     deltaY: z.number().optional().describe("Pixels, negative scrolls up (default 500)"),
     tabId: TabId,
   },
@@ -1226,6 +1292,7 @@ server.tool(
 
 server.tool(
   "trusted_drag",
+  "Trusted drag between two elements via CDP mouse events (bypasses bot detection).",
   {
     from: z.string().describe("Source selector/ref"),
     to: z.string().describe("Target selector/ref"),
@@ -1239,10 +1306,11 @@ server.tool(
 
 server.tool(
   "network_bodies",
+  "Spy-captured request/response bodies (POST data, response snippets). Requires network_mock_start first (no routes needed).",
   {
     filter: z.string().optional().describe("URL substring filter"),
     kind: z.enum(["request", "response"]).optional().describe("Only requests (with POST bodies) or only responses"),
-    limit: z.number().optional(),
+    limit: z.number().optional().describe("Max entries (default 50)"),
     tabId: TabId,
   },
   async (args) => {
@@ -1255,9 +1323,10 @@ server.tool(
 // ---------- power: raw CDP ----------
 server.tool(
   "cdp_send",
+  "Send a raw CDP command to the tab (power tool). Prefer a typed tool when one exists; tab-scoped domains only.",
   {
     method: z.string().describe("E.g. Network.enable, Page.printToPDF, Runtime.evaluate"),
-    params: z.record(z.string(), z.unknown()).optional(),
+    params: z.record(z.string(), z.unknown()).optional().describe("Method params object (default {})"),
     tabId: TabId,
   },
   async ({ method, params, tabId }) => {
