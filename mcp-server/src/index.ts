@@ -699,15 +699,15 @@ server.tool(
   {
     cookies: z.array(
       z.object({
-        name: z.string(),
-        value: z.string(),
-        url: z.string().optional(),
-        domain: z.string().optional(),
-        path: z.string().optional(),
-        secure: z.boolean().optional(),
-        httpOnly: z.boolean().optional(),
-        sameSite: z.enum(["no_restriction", "lax", "strict"]).optional(),
-        expirationDate: z.number().optional(),
+        name: z.string().describe("Cookie name"),
+        value: z.string().describe("Cookie value"),
+        url: z.string().optional().describe("URL the cookie belongs to (built from domain/path if omitted)"),
+        domain: z.string().optional().describe("Cookie domain"),
+        path: z.string().optional().describe("Cookie path (defaults to /)"),
+        secure: z.boolean().optional().describe("Secure-only flag"),
+        httpOnly: z.boolean().optional().describe("HTTP-only flag"),
+        sameSite: z.enum(["no_restriction", "lax", "strict"]).optional().describe("SameSite attribute"),
+        expirationDate: z.number().optional().describe("Unix timestamp for cookie expiry"),
       })
     ).describe("Array of cookie objects to set"),
   },
@@ -944,7 +944,7 @@ server.tool(
     contentType: z.string().optional().describe("Content-Type for fulfill (default application/json)"),
     delayMs: z.number().optional().describe("Hold time for delay"),
     headers: z
-      .array(z.object({ name: z.string(), value: z.string() }))
+      .array(z.object({ name: z.string().describe("Header name"), value: z.string().describe("Header value") }))
       .optional()
       .describe("Appended to the response headers on fulfill; applied to the request in other modes"),
     tabId: TabId,
