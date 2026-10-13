@@ -2,6 +2,14 @@
 // Page-world hooks are installed by background via chrome.scripting (unaffected by page CSP).
 
 (() => {
+  // Guard against double injection: the manifest auto-injects this file at
+  // document_start, and the background re-injects it on demand when a command
+  // races a navigation commit. Without this, two instances coexist and relay
+  // every MAIN-world event twice (duplicate console/dialog entries).
+  // (Isolated worlds reset on navigation, so per-world flag is correct.)
+  if (window.__mcpContentLoaded) return;
+  window.__mcpContentLoaded = true;
+
   // ---------- ref system ----------
   let refSeq = 0;
   const elToRef = new WeakMap();

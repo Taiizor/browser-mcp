@@ -474,7 +474,9 @@ server.tool(
     try {
       const r = await bridge.send("console_get", { level, limit }, tabId);
       return textResult(r);
-    } catch {
+    } catch (e) {
+      // Permission denials must surface (not silently downgrade to the buffer).
+      if (/Permission disabled/i.test(String((e as Error)?.message ?? e))) throw e;
       const lvl = level ?? "all";
       const lim = limit ?? 200;
       const filtered = bridge.consoleEvents
@@ -489,7 +491,8 @@ server.tool("console_clear", {}, async () => {
   try {
     const r = await bridge.send("console_clear", {});
     return textResult(r);
-  } catch {
+  } catch (e) {
+    if (/Permission disabled/i.test(String((e as Error)?.message ?? e))) throw e;
     bridge.consoleEvents.length = 0;
     return textResult({ ok: true, source: "bridge-buffer" });
   }
@@ -511,7 +514,8 @@ server.tool(
     try {
       const r = await bridge.send("network_requests", { filter, type, failedOnly, minStatus, limit, tabId });
       return textResult(r);
-    } catch {
+    } catch (e) {
+      if (/Permission disabled/i.test(String((e as Error)?.message ?? e))) throw e;
       let arr = bridge.networkEvents as Array<Record<string, unknown>>;
       if (tabId !== undefined) arr = arr.filter((e) => e.tabId === tabId);
       if (filter) arr = arr.filter((e) => String(e.url ?? "").includes(filter));
