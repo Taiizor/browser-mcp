@@ -1,106 +1,107 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <defs>
-    <linearGradient id="backGrad" x1="0" y1="0" x2="0" y2="1">
+    <linearGradient id="backGrad" gradientUnits="userSpaceOnUse" x1="0" y1="112" x2="0" y2="688">
       <stop offset="0" stop-color="#6366F1"/>
       <stop offset="1" stop-color="#8B5CF6"/>
     </linearGradient>
-    <linearGradient id="frontGrad" x1="0" y1="0" x2="0" y2="1">
+    <linearGradient id="frontGrad" gradientUnits="userSpaceOnUse" x1="0" y1="304" x2="0" y2="880">
       <stop offset="0" stop-color="#18181B"/>
       <stop offset="1" stop-color="#09090B"/>
     </linearGradient>
-    <linearGradient id="btnGrad" x1="0" y1="0" x2="0" y2="1">
+    <linearGradient id="btnGrad" gradientUnits="userSpaceOnUse" x1="0" y1="704" x2="0" y2="792">
       <stop offset="0" stop-color="#3B82F6"/>
       <stop offset="1" stop-color="#2563EB"/>
     </linearGradient>
-    <linearGradient id="cursorGrad" x1="0" y1="0" x2="0" y2="1">
+    <linearGradient id="cursorGrad" gradientUnits="userSpaceOnUse" x1="512" y1="544" x2="512" y2="743.52">
       <stop offset="0" stop-color="#38BDF8"/>
       <stop offset="0.5" stop-color="#3B82F6"/>
       <stop offset="1" stop-color="#8B5CF6"/>
     </linearGradient>
-    <linearGradient id="backStroke" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.9"/>
-      <stop offset="0.25" stop-color="#A5B4FC" stop-opacity="0.5"/>
-      <stop offset="1" stop-color="#A5B4FC" stop-opacity="0.35"/>
+    <linearGradient id="backStroke" gradientUnits="userSpaceOnUse" x1="0" y1="112" x2="0" y2="688">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.86"/>
+      <stop offset="0.097" stop-color="#A5B4FC" stop-opacity="0.51"/>
+      <stop offset="1" stop-color="#A5B4FC" stop-opacity="0.51"/>
     </linearGradient>
-    <linearGradient id="frontStroke" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.9"/>
-      <stop offset="0.2" stop-color="#71717A" stop-opacity="0.8"/>
-      <stop offset="1" stop-color="#3F3F46" stop-opacity="0.8"/>
+    <linearGradient id="frontStroke" gradientUnits="userSpaceOnUse" x1="0" y1="304" x2="0" y2="880">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.86"/>
+      <stop offset="0.083" stop-color="#3F3F46" stop-opacity="0.78"/>
+      <stop offset="1" stop-color="#3F3F46" stop-opacity="0.78"/>
     </linearGradient>
-    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
-      <stop offset="0" stop-color="#3B82F6" stop-opacity="0.28"/>
+    <radialGradient id="glow" gradientUnits="userSpaceOnUse" cx="544" cy="656" r="256">
+      <stop offset="0" stop-color="#3B82F6" stop-opacity="0.2"/>
       <stop offset="1" stop-color="#3B82F6" stop-opacity="0"/>
     </radialGradient>
-    <radialGradient id="tipGlow" cx="0.5" cy="0.5" r="0.5">
-      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.9"/>
+    <radialGradient id="tipGlow" gradientUnits="userSpaceOnUse" cx="512" cy="544" r="33.6">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.85"/>
       <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
     </radialGradient>
     <clipPath id="backClip">
-      <rect x="34" y="14" width="78" height="72" rx="14"/>
+      <rect x="272" y="112" width="624" height="576" rx="112"/>
     </clipPath>
     <clipPath id="frontClip">
-      <rect x="16" y="38" width="80" height="72" rx="14"/>
+      <rect x="128" y="304" width="640" height="576" rx="112"/>
     </clipPath>
-    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#000000" flood-opacity="0.4"/>
-    </filter>
-    <filter id="cursorShadow" x="-40%" y="-40%" width="180%" height="180%">
-      <feDropShadow dx="1.8" dy="3" stdDeviation="1.2" flood-color="#000000" flood-opacity="0.5"/>
-    </filter>
+    <clipPath id="cursorClip">
+      <polygon points="512,544 512,724.96 560.72,680.88 588.56,743.52 616.4,731.92 588.56,669.28 639.6,669.28"/>
+    </clipPath>
   </defs>
 
+  <!-- Fit 780.8x780.8 artwork edge-to-edge into the 1024 frame: scale 80/61, offset to (0,0) -->
+  <g transform="translate(-159.47541,-138.4918) scale(1.31147541)">
   <!-- Back window: electric indigo/violet glass -->
-  <g filter="url(#softShadow)">
-    <rect x="34" y="14" width="78" height="72" rx="14" fill="url(#backGrad)"/>
+  <g>
+    <rect x="272" y="112" width="624" height="576" rx="112" fill="url(#backGrad)"/>
     <g clip-path="url(#backClip)">
-      <rect x="34" y="14" width="78" height="17" fill="#4F46E5" opacity="0.55"/>
-      <rect x="44" y="33" width="52" height="4" rx="2" fill="#E0E7FF" opacity="0.3"/>
-      <rect x="44" y="43" width="38" height="4" rx="2" fill="#E0E7FF" opacity="0.22"/>
-      <rect x="90" y="53" width="14" height="18" rx="3.5" fill="#38BDF8" opacity="0.67"/>
+      <rect x="272" y="112" width="624" height="136" fill="#4F46E5" opacity="0.55"/>
+      <rect x="352" y="264" width="416" height="32" rx="16" fill="#E0E7FF" opacity="0.29"/>
+      <rect x="352" y="344" width="304" height="32" rx="16" fill="#E0E7FF" opacity="0.22"/>
+      <rect x="720" y="424" width="112" height="144" rx="28" fill="#38BDF8" opacity="0.67"/>
     </g>
     <!-- Back header dots + pill -->
-    <circle cx="44" cy="22.5" r="2.2" fill="#E0E7FF" opacity="0.75"/>
-    <circle cx="51.5" cy="22.5" r="2.2" fill="#E0E7FF" opacity="0.75"/>
-    <circle cx="59" cy="22.5" r="2.2" fill="#E0E7FF" opacity="0.75"/>
-    <rect x="68" y="18" width="36" height="9" rx="4.5" fill="#E0E7FF" opacity="0.2"/>
-    <rect x="34" y="14" width="78" height="72" rx="14" fill="none" stroke="url(#backStroke)" stroke-width="1.5"/>
+    <circle cx="352" cy="180" r="17.6" fill="#E0E7FF" opacity="0.75"/>
+    <circle cx="412" cy="180" r="17.6" fill="#E0E7FF" opacity="0.75"/>
+    <circle cx="472" cy="180" r="17.6" fill="#E0E7FF" opacity="0.75"/>
+    <rect x="544" y="144" width="288" height="72" rx="36" fill="#E0E7FF" opacity="0.2"/>
+    <path fill-rule="evenodd" fill="url(#backStroke)" d="M 265.6 224 V 576 A 118.4 118.4 0 0 0 384 694.4 H 784 A 118.4 118.4 0 0 0 902.4 576 V 224 A 118.4 118.4 0 0 0 784 105.6 H 384 A 118.4 118.4 0 0 0 265.6 224 Z M 281.6 224 V 576 A 102.4 102.4 0 0 0 384 678.4 H 784 A 102.4 102.4 0 0 0 886.4 576 V 224 A 102.4 102.4 0 0 0 784 121.6 H 384 A 102.4 102.4 0 0 0 281.6 224 Z"/>
   </g>
 
   <!-- Front window: obsidian/zinc glass -->
-  <g filter="url(#softShadow)">
-    <rect x="16" y="38" width="80" height="72" rx="14" fill="url(#frontGrad)"/>
+  <g>
+    <rect x="128" y="304" width="640" height="576" rx="112" fill="url(#frontGrad)"/>
     <g clip-path="url(#frontClip)">
-      <ellipse cx="68" cy="82" rx="32" ry="32" fill="url(#glow)"/>
-      <rect x="16" y="38" width="80" height="20" fill="#101014"/>
-      <rect x="16" y="56.8" width="80" height="1.2" fill="#27272A"/>
-      <rect x="25" y="65" width="35" height="4" rx="2" fill="#71717A" opacity="0.63"/>
-      <rect x="25" y="75" width="23" height="4" rx="2" fill="#52525B" opacity="0.55"/>
+      <circle cx="544" cy="656" r="256" fill="url(#glow)"/>
+      <rect x="128" y="304" width="640" height="160" fill="#101014"/>
+      <rect x="128" y="454.4" width="640" height="9.6" fill="#27272A"/>
+      <rect x="200" y="520" width="280" height="32" rx="16" fill="#71717A" opacity="0.63"/>
+      <rect x="200" y="600" width="184" height="32" rx="16" fill="#52525B" opacity="0.55"/>
     </g>
     <!-- Traffic dots -->
-    <circle cx="25" cy="48" r="2.2" fill="#F43F5E"/>
-    <circle cx="31.5" cy="48" r="2.2" fill="#F59E0B"/>
-    <circle cx="38" cy="48" r="2.2" fill="#10B981"/>
+    <circle cx="200" cy="384" r="17.6" fill="#F43F5E"/>
+    <circle cx="252" cy="384" r="17.6" fill="#F59E0B"/>
+    <circle cx="304" cy="384" r="17.6" fill="#10B981"/>
     <!-- URL / command pill -->
-    <rect x="45" y="42.5" width="43" height="11" rx="5" fill="#1E1E24" stroke="#2D2D37" stroke-width="1"/>
-    <circle cx="51" cy="48" r="1.4" fill="#38BDF8" opacity="0.86"/>
-    <rect x="56" y="46.5" width="24" height="3" rx="1.5" fill="#71717A" opacity="0.7"/>
+    <rect x="360" y="340" width="344" height="88" rx="36" fill="#1E1E24" stroke="#2D2D37" stroke-opacity="0.8" stroke-width="8"/>
+    <circle cx="408" cy="384" r="11.2" fill="#38BDF8" opacity="0.86"/>
+    <rect x="448" y="372" width="192" height="24" rx="9.6" fill="#71717A" opacity="0.71"/>
     <!-- Automation button -->
-    <rect x="25" y="88" width="31" height="11" rx="5" fill="url(#btnGrad)" stroke="#60A5FA" stroke-opacity="0.7" stroke-width="1"/>
-    <path d="M 33 91 L 37 93.5 L 33 96" fill="none" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" opacity="0.94"/>
-    <path d="M 41 95.5 H 46" fill="none" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round" opacity="0.8"/>
-    <rect x="16" y="38" width="80" height="72" rx="14" fill="none" stroke="url(#frontStroke)" stroke-width="1.5"/>
+    <rect x="200" y="704" width="248" height="88" rx="36" fill="url(#btnGrad)" stroke="#60A5FA" stroke-opacity="0.7" stroke-width="8"/>
+    <path d="M 264 728 L 296 748 L 264 768" fill="none" stroke="#FFFFFF" stroke-width="17.6" stroke-linecap="round" stroke-linejoin="round" opacity="0.94"/>
+    <path d="M 328 764 H 368" fill="none" stroke="#FFFFFF" stroke-width="16" stroke-linecap="round" opacity="0.78"/>
+    <path fill-rule="evenodd" fill="url(#frontStroke)" d="M 121.6 416 V 768 A 118.4 118.4 0 0 0 240 886.4 H 656 A 118.4 118.4 0 0 0 774.4 768 V 416 A 118.4 118.4 0 0 0 656 297.6 H 240 A 118.4 118.4 0 0 0 121.6 416 Z M 137.6 416 V 768 A 102.4 102.4 0 0 0 240 870.4 H 656 A 102.4 102.4 0 0 0 758.4 768 V 416 A 102.4 102.4 0 0 0 656 313.6 H 240 A 102.4 102.4 0 0 0 137.6 416 Z"/>
   </g>
 
-  <!-- Hero cursor -->
-  <g filter="url(#cursorShadow)">
-    <polygon
-      points="64,68 64,90.62 70.09,85.11 73.57,92.94 77.05,91.49 73.57,83.66 79.95,83.66"
-      fill="url(#cursorGrad)"
-      stroke="#FFFFFF"
-      stroke-width="3"
-      stroke-linejoin="round"
-      stroke-linecap="round"
-      paint-order="stroke"/>
-    <circle cx="64" cy="68" r="4.2" fill="url(#tipGlow)"/>
+  <!-- Hero cursor: white rim silhouette, gradient fill -->
+  <polygon
+    points="512,544 512,724.96 560.72,680.88 588.56,743.52 616.4,731.92 588.56,669.28 639.6,669.28"
+    fill="#FFFFFF"
+    stroke="#FFFFFF"
+    stroke-width="24"
+    stroke-linejoin="round"/>
+  <polygon
+    points="512,544 512,724.96 560.72,680.88 588.56,743.52 616.4,731.92 588.56,669.28 639.6,669.28"
+    fill="url(#cursorGrad)"/>
+  <g clip-path="url(#cursorClip)">
+    <circle cx="512" cy="544" r="33.6" fill="url(#tipGlow)"/>
+  </g>
   </g>
 </svg>
