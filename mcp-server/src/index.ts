@@ -413,24 +413,32 @@ server.tool(
       );
       return textResult(r);
     } catch (e) {
-      // content-script eval is blocked on strict-CSP pages.
-      // Fallback: Runtime.evaluate over the debugger (unaffected by CSP).
-      if (!/Content Security Policy/i.test(String((e as Error)?.message ?? e))) {
+      // Old extensions (<0.3.2) evaluated via content-script new Function,
+      // blocked by the extension CSP (no 'unsafe-eval'). Fallback keeps them
+      // working: Runtime.evaluate over the debugger (unaffected by CSP).
+      if (!/Content Security Policy|unsafe-eval|Evaluating a string|handled via CDP/i.test(String((e as Error)?.message ?? e))) {
         throw e;
       }
-      const cdp = (await bridge.send(
-        "cdp_send",
-        {
-          method: "Runtime.evaluate",
-          params: {
-            expression,
-            awaitPromise: awaitPromise ?? false,
-            returnByValue: true,
+      const evalOnce = async (expr: string, awaitP: boolean) =>
+        (await bridge.send(
+          "cdp_send",
+          {
+            method: "Runtime.evaluate",
+            params: {
+              expression: expr,
+              awaitPromise: awaitP,
+              returnByValue: true,
+              includeCommandLineAPI: true,
+            },
           },
-        },
-        tabId,
-        30000
-      )) as { result?: { result?: { value?: unknown }; exceptionDetails?: unknown } };
+          tabId,
+          30000
+        )) as { result?: { result?: { value?: unknown }; exceptionDetails?: unknown } };
+      let cdp = await evalOnce(expression, awaitPromise ?? false);
+      if (cdp?.result?.exceptionDetails) {
+        // `return` outside a function needs function-body semantics: retry wrapped.
+        cdp = await evalOnce(`(async () => { ${expression} })()`, true);
+      }
       if (cdp?.result?.exceptionDetails) {
         throw new Error(`Page JS error: ${JSON.stringify(cdp.result.exceptionDetails).slice(0, 500)}`);
       }
@@ -1525,18 +1533,73 @@ server.prompt(
 // ---------- start ----------
 async function main() {
   bridge = await createBridge(PORT);
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-  console.error(`[browser-mcp] stdio ready, ws bridge on :${PORT}`);
 
-  const shutdown = () => {
+  let shuttingDown = false;
+  const shutdown = (reason: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.error(`[browser-mcp] shutting down (${reason})`);
     try {
       bridge.close();
     } catch {}
-    process.exit(0);
+    // The WS server keeps the event loop alive, so force-exit after a
+    // short grace period for sockets to close cleanly.
+    setTimeout(() => process.exit(0), 250).unref?.();
   };
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
+
+  const transport = new StdioServerTransport();
+  // Preserved across server.connect() (Protocol wraps a pre-set handler).
+  transport.onclose = () => shutdown("transport-close");
+  await server.connect(transport);
+  console.error(`[browser-mcp] stdio ready, ws bridge on :${PORT}`);
+
+  process.on("SIGINT", () => shutdown("SIGINT"));
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  // General fix for orphan servers: disabling the MCP in the agent closes
+  // the stdio pipe but StdioServerTransport never calls close() on stdin
+  // EOF, so without this the bun process lingers holding :PORT forever.
+  // Opt out with BROWSER_MCP_NO_STDIO_EXIT=1.
+  if (process.env.BROWSER_MCP_NO_STDIO_EXIT !== "1") {
+    try {
+      process.stdin.on("close", () => shutdown("stdin-close"));
+      process.stdin.on("end", () => shutdown("stdin-end"));
+    } catch {}
+  }
+  // Parent watchdog: if the launching agent died without delivering SIGTERM
+  // (kill -9, crash, Task Manager), exit instead of squatting on the port.
+  // A satellite whose agent is gone exits here too instead of promoting to
+  // primary and living forever. Opt out with BROWSER_MCP_NO_PARENT_CHECK=1.
+  const parentPid = process.ppid;
+  const parentCheckMs = Number(process.env.BROWSER_MCP_PARENT_CHECK_MS ?? 10000);
+  if (
+    process.env.BROWSER_MCP_NO_PARENT_CHECK !== "1" &&
+    parentPid > 1 &&
+    Number.isFinite(parentCheckMs) &&
+    parentCheckMs > 0
+  ) {
+    const timer = setInterval(() => {
+      // Orphaned + reparented to init (Unix): original parent is gone.
+      try {
+        if (process.ppid !== parentPid && process.ppid <= 1) {
+          clearInterval(timer);
+          shutdown("parent-reparented");
+          return;
+        }
+      } catch {}
+      try {
+        process.kill(parentPid, 0);
+      } catch (e) {
+        // ESRCH = no such process (parent gone). EPERM = alive, ignore.
+        if ((e as NodeJS.ErrnoException)?.code === "ESRCH") {
+          clearInterval(timer);
+          shutdown("parent-gone");
+        }
+      }
+    }, parentCheckMs);
+    try {
+      (timer as unknown as { unref?: () => void }).unref?.();
+    } catch {}
+  }
 }
 
 main().catch((e) => {

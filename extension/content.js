@@ -500,22 +500,10 @@
             break;
           }
           case "js_evaluate": {
-            let fn;
-            try {
-              fn = new Function(payload.expression);
-            } catch {
-              fn = new Function(`return (${payload.expression})`);
-            }
-            let v = fn();
-            if (payload.awaitPromise && v && typeof v.then === "function") v = await v;
-            let json;
-            try {
-              json = JSON.parse(JSON.stringify(v));
-            } catch {
-              json = String(v);
-            }
-            result = { value: json };
-            break;
+            // CSP-safe stub: real evaluation happens in background via CDP
+            // Runtime.evaluate. Never use eval/new Function here (violates
+            // the extension CSP which lacks 'unsafe-eval').
+            throw new Error("js_evaluate is handled via CDP in background (update extension)");
           }
           case "storage_get": {
             const area = payload.area === "session" ? sessionStorage : localStorage;

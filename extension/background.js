@@ -910,7 +910,6 @@ async function handleCommand(action, payload, tabId) {
     case "keyboard_press":
     case "page_find":
     case "page_wait":
-    case "js_evaluate":
     case "storage_get":
     case "storage_set":
     case "idb_list":
@@ -927,6 +926,45 @@ async function handleCommand(action, payload, tabId) {
       if (Array.isArray(v)) return { tabId: r.tabId, items: v };
       if (v && typeof v === "object") return Object.assign({ tabId: r.tabId }, v);
       return { tabId: r.tabId, value: v };
+    }
+
+    case "js_evaluate": {
+      // CSP-safe: evaluated via CDP Runtime.evaluate (trusted, bypasses both
+      // page CSP and the extension's own script-src without unsafe-eval).
+      // Never use eval/new Function here or in content.js.
+      const id = tabId ?? (await activeTabId());
+      const expr = String(payload.expression ?? "");
+      const awaitPromise = !!payload.awaitPromise;
+      const out = await withDebugger(id, async (dbg) => {
+        const first = await cdpSend(dbg, "Runtime.evaluate", {
+          expression: expr,
+          awaitPromise,
+          returnByValue: true,
+          includeCommandLineAPI: true,
+        });
+        if (!first.exceptionDetails) {
+          const r = first.result || {};
+          const val = r.value !== undefined ? r.value : r.description;
+          return { value: val, via: "cdp" };
+        }
+        // `return` outside a function or multi-statement input fails as a
+        // bare expression: retry with function-body semantics
+        // (old `new Function` behavior) inside an async IIFE.
+        const wrapped = `(async () => { ${expr} })()`;
+        const second = await cdpSend(dbg, "Runtime.evaluate", {
+          expression: wrapped,
+          awaitPromise: true,
+          returnByValue: true,
+          includeCommandLineAPI: true,
+        });
+        if (second.exceptionDetails) {
+          throw new Error(`Page JS error: ${JSON.stringify(second.exceptionDetails).slice(0, 1000)}`);
+        }
+        const r2 = second.result || {};
+        const val2 = r2.value !== undefined ? r2.value : r2.description;
+        return { value: val2, via: "cdp" };
+      });
+      return { tabId: id, ...out };
     }
 
     case "page_screenshot": {
