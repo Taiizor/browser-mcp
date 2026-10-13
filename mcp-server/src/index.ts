@@ -29,6 +29,19 @@ function parsePort(): number {
 
 const PORT = parsePort();
 
+function parseBrowser(): string | undefined {
+  const args = process.argv.slice(2);
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if ((arg === "--browser" || arg === "-b") && i + 1 < args.length) {
+      return args[i + 1];
+    }
+    const m = arg.match(/^(?:--browser|-b)=(.+)$/);
+    if (m) return m[1];
+  }
+  return undefined;
+}
+
 // Multi-agent sharing: the first process owns the WS bridge (primary),
 // later processes join it as satellite clients instead of failing on
 // EADDRINUSE. All satellites relay through the single extension socket.
@@ -1533,6 +1546,9 @@ server.prompt(
 
 // ---------- start ----------
 async function main() {
+  // CLI wins over env for browser selection (bridge reads process.env.BROWSER).
+  const browserFlag = parseBrowser();
+  if (browserFlag && browserFlag.trim()) process.env.BROWSER = browserFlag.trim();
   bridge = await createBridge(PORT);
 
   let shuttingDown = false;

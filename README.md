@@ -182,6 +182,30 @@ You can configure the WebSocket bridge port from **either** side:
 - **Environment Variable:** `BROWSER_MCP_PORT=9000` or `PORT=9000`
 - **Extension Popup:** Type the port in the popup footer and click **Set** (or press Enter). Click **↺** to reset to `8765`. Reconnection is instant without reloading the extension.
 
+### Browser Selection (auto-launch)
+
+When the extension is not connected, the server opens a browser in this priority order:
+
+1. `BROWSER` (friendly name: `chrome|edge|brave|opera`, CLI: `--browser edge`) or `BROWSER_PATH` (full path to any Chromium binary; legacy `CHROME_PATH` also works)
+2. The browser that last connected the extension (sticky, auto-remembered)
+3. A browser that is already running (wakes it instead of opening another one)
+4. The OS default browser (Windows registry / `xdg-settings`)
+5. Chrome → Edge → Brave → Opera well-known install paths (first one only)
+
+If the extension lives in a different browser than the default (e.g. default Edge, extension in Chrome), the launcher tries each candidate within the timeout budget and remembers the winner — or pin it directly:
+
+```json
+"env": { "BROWSER": "edge" }
+```
+
+Set `BROWSER_AUTO_LAUNCH=0` to disable auto-launch entirely.
+
+Works on Windows, Linux and macOS (Bun runtime; the extension is plain MV3).
+Platform notes: on macOS browsers resolve via `/Applications/...app` bundles
+and `pgrep` process names; OS-default detection uses the Windows registry or
+Linux `xdg-settings` (no stock equivalent on macOS — sticky/running/PATH
+heuristics apply there).
+
 ---
 
 ## Permissions & UI (Extension Popup)

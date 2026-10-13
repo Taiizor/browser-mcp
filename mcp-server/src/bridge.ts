@@ -47,6 +47,18 @@ export interface IBridge {
   close(): void;
 }
 
+export type BrowserId = "chrome" | "edge" | "brave" | "opera";
+
+/** Friendly BROWSER= names (also accepts raw paths / exe names at launch). */
+export function normalizeBrowserId(input: string): BrowserId | null {
+  const v = input.trim().toLowerCase().replace(/[^a-z]/g, "");
+  if (v === "chrome" || v === "googlechrome" || v === "chromium") return "chrome";
+  if (v === "edge" || v === "microsoftedge" || v === "msedge") return "edge";
+  if (v === "brave" || v === "bravebrowser") return "brave";
+  if (v === "opera" || v === "operastable") return "opera";
+  return null;
+}
+
 export class ExtensionBridge implements IBridge {
   public readonly port: number;
   private wss: WebSocketServer;
@@ -60,6 +72,9 @@ export class ExtensionBridge implements IBridge {
   private readyReject: ((e: Error) => void) | null = null;
   private readySettled = false;
   private exitOnAddrInUse: boolean;
+  // Sticky browser: the browser that last connected the extension
+  // (reported via hello). Preferred on the next launch.
+  private lastBrowser: BrowserId | null = null;
 
   //-ring buffers for pushed events (so tools work even with polling)
   consoleEvents: Array<unknown> = [];
@@ -157,6 +172,10 @@ export class ExtensionBridge implements IBridge {
     // Extension identity: this socket is the real extension
     if (msg.type === "hello" && (msg as { role?: string }).role === "extension") {
       this.claimExtension(ws);
+      // Sticky browser: remember which browser holds the extension so the
+      // next launch opens the same one (not hardcoded Chrome-first).
+      const b = (msg as { browser?: unknown }).browser;
+      if (b === "chrome" || b === "edge" || b === "brave" || b === "opera") this.rememberBrowser(b);
       return;
     }
     // Response to a pending command (the responding socket is the extension)
@@ -256,25 +275,215 @@ export class ExtensionBridge implements IBridge {
     return Number.isFinite(v) && v > 0 ? v : 45000;
   }
 
-  private findChrome(): string | null {
-    const candidates = [
-      process.env.CHROME_PATH,
-      "C:/Program Files/Google/Chrome/Application/chrome.exe",
-      "C:/Program Files (x86)/Google/Chrome/Application/chrome.exe",
-      process.env["ProgramFiles"] ? `${process.env["ProgramFiles"]}/Google/Chrome/Application/chrome.exe` : null,
-      "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
-      "C:/Program Files/Microsoft/Edge/Application/msedge.exe",
-    ].filter(Boolean) as string[];
+  /**
+   * Explicit browser choice: BROWSER_PATH (full path or exe name) first,
+   * then BROWSER= (friendly name like "edge", or a path), then legacy
+   * CHROME_PATH. Returns null when nothing usable was configured.
+   */
+  private explicitBrowserBin(): string | null {
+    const byPath = (v: string): string | null => {
+      try {
+        const fs = require("node:fs") as typeof import("node:fs");
+        try {
+          fs.accessSync(v);
+          return v;
+        } catch {}
+      } catch {}
+      try {
+        return Bun.which(v) ?? null;
+      } catch {}
+      return null;
+    };
+    if (process.env.BROWSER_PATH) {
+      const r = byPath(process.env.BROWSER_PATH);
+      if (r) return r;
+    }
+    const name = (process.env.BROWSER ?? "").trim();
+    if (name) {
+      const asPath = byPath(name);
+      if (asPath) return asPath;
+      const id = normalizeBrowserId(name);
+      if (id) {
+        const b = this.resolveBrowserBin(id);
+        if (b) return b;
+      }
+      console.error(`[bridge] unknown BROWSER=${JSON.stringify(name)} (want chrome|edge|brave|opera or a binary path), ignoring`);
+    }
+    if (process.env.CHROME_PATH) {
+      const r = byPath(process.env.CHROME_PATH);
+      if (r) return r;
+    }
+    return null;
+  }
+
+  /** Start the browser (if needed) and wait for the extension to connect. */
+  async launchBrowser(timeoutMs?: number): Promise<{ connected: boolean; launched: boolean; detail: string }> {
+    if (this.connected) return { connected: true, launched: false, detail: "Extension already connected." };
+    const wait = timeoutMs ?? this.launchTimeoutMs;
+    const deadline = Date.now() + wait;
+    const running = await this.runningBrowsers();
+    const sticky = this.lastBrowser ?? this.readStickyBrowser();
+    const def = this.defaultBrowserId();
+
+    // Ordered browser ids: explicit BROWSER= -> sticky -> running ->
+    // OS default -> Chrome/Edge/Brave/Opera.
+    const ids: Array<BrowserId> = [];
+    const pushId = (id: BrowserId) => {
+      if (!ids.includes(id)) ids.push(id);
+    };
+    const explicitName = (process.env.BROWSER ?? "").trim();
+    const explicitId = explicitName ? normalizeBrowserId(explicitName) : null;
+    if (explicitId) pushId(explicitId);
+    if (sticky) pushId(sticky);
+    (["chrome", "edge", "brave", "opera"] as const).forEach((id) => {
+      if (running[id]) pushId(id);
+    });
+    if (def) pushId(def);
+    pushId("chrome");
+    pushId("edge");
+    pushId("brave");
+    pushId("opera");
+    const signaled = new Set<string>();
+    if (explicitId) signaled.add(explicitId);
+    if (sticky) signaled.add(sticky);
+    (["chrome", "edge", "brave", "opera"] as const).forEach((id) => {
+      if (running[id]) signaled.add(id);
+    });
+    if (def) signaled.add(def);
+
+    // Resolve to binaries. Browsers with a positive signal (explicit, sticky,
+    // running, default) are all tried in order; pure fallbacks only the first
+    // one — don't open every installed browser blindly. Total time is capped
+    // by the requested timeout; each attempt gets at most 20s.
+    const attempts: string[] = [];
+    const seen = new Set<string>();
+    const pushBin = (b: string | null) => {
+      if (b && !seen.has(b)) {
+        seen.add(b);
+        attempts.push(b);
+      }
+    };
+    const explicit = this.explicitBrowserBin();
+    pushBin(explicit);
+    let fallbackUsed = false;
+    for (const id of ids) {
+      const hasSignal = signaled.has(id);
+      if (!hasSignal && fallbackUsed) continue;
+      const b = this.resolveBrowserBin(id);
+      if (!b || seen.has(b)) continue;
+      pushBin(b);
+      if (!hasSignal) fallbackUsed = true;
+    }
+
+    if (!attempts.length) {
+      return { connected: false, launched: false, detail: "No Chromium browser found. Set BROWSER=chrome|edge|brave|opera or BROWSER_PATH to your browser binary, or open the browser holding the extension manually." };
+    }
+    const extPages = [...new Set(attempts.map((b) => this.extPageFor(b)))].join(" / ");
+    let spawned = false;
+    for (const b of attempts) {
+      if (this.connected) break;
+      const remaining = deadline - Date.now();
+      if (remaining < 3000) break;
+      try {
+        const proc = Bun.spawn([b, "--new-window", "about:blank"], {
+          stdin: "ignore",
+          stdout: "ignore",
+          stderr: "ignore",
+        });
+        proc.unref();
+        spawned = true;
+      } catch {}
+      const ok = await this.waitForConnection(Math.min(20000, remaining));
+      if (ok) {
+        return { connected: true, launched: true, detail: `Extension connected via ${b}.` };
+      }
+    }
+    if (this.connected) return { connected: true, launched: spawned, detail: "Extension connected." };
+    return {
+      connected: false,
+      launched: spawned,
+      detail: `Tried ${attempts.join(", ")} but the extension did not connect. Open the browser where Browser MCP is installed (${extPages} -> enable it), or set BROWSER=chrome|edge|brave|opera (or BROWSER_PATH) to that browser. The choice is remembered after the first connection.`,
+    };
+  }
+
+  private extPageFor(bin: string): string {
+    if (/msedge/i.test(bin)) return "edge://extensions";
+    if (/brave/i.test(bin)) return "brave://extensions";
+    if (/opera/i.test(bin)) return "opera://extensions";
+    return "chrome://extensions";
+  }
+
+  private browserPaths(id: string): string[] {
+    const out: string[] = [];
+    if (process.platform === "darwin") {
+      if (id === "edge") out.push("/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge");
+      else if (id === "brave") out.push("/Applications/Brave Browser.app/Contents/MacOS/Brave Browser");
+      else if (id === "opera") out.push("/Applications/Opera.app/Contents/MacOS/Opera");
+      else
+        out.push(
+          "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+          "/Applications/Chromium.app/Contents/MacOS/Chromium"
+        );
+      return out;
+    }
+    const pf = process.env["ProgramFiles"];
+    const pf86 = process.env["ProgramFiles(x86)"];
+    const local = process.env["LOCALAPPDATA"];
+    if (id === "edge") {
+      out.push(
+        "C:/Program Files/Microsoft/Edge/Application/msedge.exe",
+        "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"
+      );
+      if (pf) out.push(`${pf}/Microsoft/Edge/Application/msedge.exe`);
+      if (pf86) out.push(`${pf86}/Microsoft/Edge/Application/msedge.exe`);
+    } else if (id === "brave") {
+      if (pf) out.push(`${pf}/BraveSoftware/Brave-Browser/Application/brave.exe`);
+      if (pf86) out.push(`${pf86}/BraveSoftware/Brave-Browser/Application/brave.exe`);
+      if (local) out.push(`${local}/BraveSoftware/Brave-Browser/Application/brave.exe`);
+      out.push("C:/Program Files/BraveSoftware/Brave-Browser/Application/brave.exe");
+    } else if (id === "opera") {
+      if (local) out.push(`${local}/Programs/Opera/opera.exe`);
+      if (pf) out.push(`${pf}/Opera/opera.exe`);
+      if (pf86) out.push(`${pf86}/Opera/opera.exe`);
+      out.push("C:/Program Files/Opera/opera.exe");
+    } else {
+      out.push(
+        "C:/Program Files/Google/Chrome/Application/chrome.exe",
+        "C:/Program Files (x86)/Google/Chrome/Application/chrome.exe"
+      );
+      if (pf) out.push(`${pf}/Google/Chrome/Application/chrome.exe`);
+      if (pf86) out.push(`${pf86}/Google/Chrome/Application/chrome.exe`);
+    }
+    return out;
+  }
+
+  private resolveBrowserBin(id: string): string | null {
     try {
       const fs = require("node:fs") as typeof import("node:fs");
-      for (const c of candidates) {
+      for (const c of this.browserPaths(id)) {
         try {
           fs.accessSync(c);
           return c;
         } catch {}
       }
     } catch {}
-    for (const bin of ["chrome", "chrome.exe", "msedge", "msedge.exe"]) {
+    const bins =
+      process.platform === "win32"
+        ? id === "edge"
+          ? ["msedge.exe"]
+          : id === "brave"
+            ? ["brave.exe"]
+            : id === "opera"
+              ? ["opera.exe"]
+              : ["chrome.exe"]
+        : id === "edge"
+          ? ["microsoft-edge", "msedge"]
+          : id === "brave"
+            ? ["brave-browser", "brave"]
+            : id === "opera"
+              ? ["opera"]
+              : ["google-chrome", "chrome", "chromium"];
+    for (const bin of bins) {
       try {
         const found = Bun.which(bin);
         if (found) return found;
@@ -283,23 +492,109 @@ export class ExtensionBridge implements IBridge {
     return null;
   }
 
-  private async isChromeRunning(): Promise<boolean> {
+  private defaultBrowserId(): BrowserId | null {
+    try {
+      if (process.platform === "win32") {
+        const r = Bun.spawnSync([
+          "reg",
+          "query",
+          "HKCU\\Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\http\\UserChoice",
+          "/v",
+          "ProgId",
+        ]);
+        const text = r.stdout ? Buffer.from(r.stdout).toString() : "";
+        const m = text.match(/ProgId\s+REG_SZ\s+(\S+)/);
+        const progId = m ? m[1] : "";
+        if (/^ChromeHTML/i.test(progId)) return "chrome";
+        if (/^MSEdgeHTM/i.test(progId)) return "edge";
+        if (/^BraveHTML/i.test(progId)) return "brave";
+        if (/^OperaStable/i.test(progId)) return "opera";
+        return null; // FirefoxURL etc: our extension can't run there, don't prefer it
+      }
+      // No reliable built-in default-browser query on macOS (duti not stock);
+      // sticky/running/PATH heuristics cover it.
+      if (process.platform === "darwin") return null;
+      const r = Bun.spawnSync(["xdg-settings", "get", "default-web-browser"]);
+      const desktop = r.stdout ? Buffer.from(r.stdout).toString().trim().toLowerCase() : "";
+      if (!desktop) return null;
+      if (desktop.includes("brave")) return "brave";
+      if (desktop.includes("msedge") || desktop.includes("microsoft-edge")) return "edge";
+      if (desktop.includes("chrome") || desktop.includes("chromium")) return "chrome";
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  private stickyFile(): string {
+    try {
+      const os = require("node:os") as typeof import("node:os");
+      const path = require("node:path") as typeof import("node:path");
+      return path.join(os.tmpdir(), "browser-mcp-last-browser");
+    } catch {
+      return "";
+    }
+  }
+
+  private readStickyBrowser(): BrowserId | null {
+    try {
+      const f = this.stickyFile();
+      if (!f) return null;
+      const fs = require("node:fs") as typeof import("node:fs");
+      return normalizeBrowserId(fs.readFileSync(f, "utf8"));
+    } catch {}
+    return null;
+  }
+
+  private rememberBrowser(id: BrowserId): void {
+    this.lastBrowser = id;
+    try {
+      const f = this.stickyFile();
+      if (f) (require("node:fs") as typeof import("node:fs")).writeFileSync(f, id);
+    } catch {}
+  }
+
+  private async runningBrowsers(): Promise<Record<BrowserId, boolean>> {
+    const out: Record<BrowserId, boolean> = { chrome: false, edge: false, brave: false, opera: false };
     try {
       if (process.platform !== "win32") {
-        const p = Bun.spawnSync(["pgrep", "-x", "chrome"]);
-        if (p.exitCode === 0) return true;
-        const e = Bun.spawnSync(["pgrep", "-x", "msedge"]);
-        return e.exitCode === 0;
+        // macOS process names contain spaces ("Google Chrome"); pgrep -x
+        // matches them exactly (helpers like "Google Chrome Helper" excluded).
+        const darwin = process.platform === "darwin";
+        const bins: Record<BrowserId, string[]> = darwin
+          ? {
+            chrome: ["Google Chrome", "Chromium"],
+            edge: ["Microsoft Edge"],
+            brave: ["Brave Browser"],
+            opera: ["Opera"],
+          }
+          : {
+            chrome: ["google-chrome", "chrome", "chromium"],
+            edge: ["microsoft-edge", "msedge"],
+            brave: ["brave-browser", "brave"],
+            opera: ["opera"],
+          };
+        for (const id of ["chrome", "edge", "brave", "opera"] as const) {
+          for (const bin of bins[id]) {
+            try {
+              const p = Bun.spawnSync(["pgrep", "-x", bin]);
+              if (p.exitCode === 0) {
+                out[id] = true;
+                break;
+              }
+            } catch {}
+          }
+        }
+        return out;
       }
-      const p = Bun.spawnSync(["tasklist", "/FI", "IMAGENAME eq chrome.exe", "/NH"]);
-      const out = p.stdout ? Buffer.from(p.stdout).toString() : "";
-      if (/chrome\.exe/i.test(out)) return true;
-      const e = Bun.spawnSync(["tasklist", "/FI", "IMAGENAME eq msedge.exe", "/NH"]);
-      const out2 = e.stdout ? Buffer.from(e.stdout).toString() : "";
-      return /msedge\.exe/i.test(out2);
-    } catch {
-      return false;
-    }
+      const p = Bun.spawnSync(["tasklist", "/NH"]);
+      const text = p.stdout ? Buffer.from(p.stdout).toString() : "";
+      out.chrome = /\bchrome\.exe\b/i.test(text);
+      out.edge = /\bmsedge\.exe\b/i.test(text);
+      out.brave = /\bbrave\.exe\b/i.test(text);
+      out.opera = /\bopera\.exe\b/i.test(text);
+    } catch {}
+    return out;
   }
 
   private waitForConnection(timeoutMs: number): Promise<boolean> {
@@ -327,52 +622,6 @@ export class ExtensionBridge implements IBridge {
     });
   }
 
-  /** Start the browser (if needed) and wait for the extension to connect. */
-  async launchBrowser(timeoutMs?: number): Promise<{ connected: boolean; launched: boolean; detail: string }> {
-    if (this.connected) return { connected: true, launched: false, detail: "Extension already connected." };
-    const wait = timeoutMs ?? this.launchTimeoutMs;
-    if (await this.isChromeRunning()) {
-      // Browser process exists but the extension is silent (background-only
-      // process, sleeping worker...): open a window to wake it, then wait.
-      const bin = this.findChrome();
-      if (bin) {
-        try {
-          const proc = Bun.spawn([bin, "--new-window", "about:blank"], {
-            stdin: "ignore",
-            stdout: "ignore",
-            stderr: "ignore",
-          });
-          proc.unref();
-        } catch {}
-      }
-      const ok = await this.waitForConnection(wait);
-      if (ok) return { connected: true, launched: true, detail: "Woke the running browser, extension connected." };
-      return {
-        connected: false,
-        launched: true,
-        detail: "Chrome is running but the extension did not connect. Check chrome://extensions that Browser MCP is enabled.",
-      };
-    }
-    const bin = this.findChrome();
-    if (!bin) {
-      return { connected: false, launched: false, detail: "No Chrome/Edge binary found. Set CHROME_PATH or open Chrome manually." };
-    }
-    try {
-      const proc = Bun.spawn([bin, "--new-window", "about:blank"], {
-        stdin: "ignore",
-        stdout: "ignore",
-        stderr: "ignore",
-      });
-      proc.unref();
-    } catch (e) {
-      return { connected: false, launched: false, detail: `Failed to start browser: ${String((e as Error)?.message ?? e)}` };
-    }
-    const ok = await this.waitForConnection(wait);
-    return ok
-      ? { connected: true, launched: true, detail: "Browser started, extension connected." }
-      : { connected: false, launched: true, detail: "Browser started but the extension did not connect in time. Check chrome://extensions that Browser MCP is enabled." };
-  }
-
   /** Close the browser. Graceful = close all windows via the extension (needs connection). Force = kill the browser process (server-side). */
   async closeBrowser(force = false): Promise<{ closed: boolean; detail: string }> {
     if (!force) {
@@ -398,16 +647,18 @@ export class ExtensionBridge implements IBridge {
           }
         };
         let killed: string[] = [];
-        for (const name of ["chrome.exe", "msedge.exe"]) {
+        for (const name of ["chrome.exe", "msedge.exe", "brave.exe", "opera.exe"]) {
           if (!running(name)) continue;
           Bun.spawnSync(["taskkill", "/F", "/IM", name]);
           killed.push(name);
         }
         return killed.length
           ? { closed: true, detail: `Killed: ${killed.join(", ")}` }
-          : { closed: false, detail: "No Chrome/Edge process found." };
+          : { closed: false, detail: "No Chrome/Edge/Brave/Opera process found." };
       }
-      for (const proc of ["chrome", "msedge"]) {
+      for (const proc of process.platform === "darwin"
+        ? ["Google Chrome", "Microsoft Edge", "Brave Browser", "Opera"]
+        : ["chrome", "msedge", "brave", "opera"]) {
         try {
           Bun.spawnSync(["pkill", "-x", proc]);
         } catch {}

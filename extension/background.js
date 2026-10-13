@@ -82,9 +82,18 @@ function connect() {
   ws.onopen = () => {
     reconnectMs = 1000;
     console.log(`[mcp] bridge connected on port ${currentPort}`);
-    // Identify ourselves to the server (so popup probes don't hijack the socket)
+    // Identify ourselves to the server (so popup probes don't hijack the socket).
+    // `browser` lets the server remember which browser holds the extension
+    // and launch the same one next time (not hardcoded Chrome-first).
     try {
-      ws.send(JSON.stringify({ type: "hello", role: "extension" }));
+      let browser = "chrome";
+      try {
+        const ua = navigator.userAgent || "";
+        if (/Edg\//.test(ua)) browser = "edge";
+        else if (/OPR\/|Opera/.test(ua)) browser = "opera";
+        else if (/\bBrave\//.test(ua)) browser = "brave";
+      } catch {}
+      ws.send(JSON.stringify({ type: "hello", role: "extension", browser }));
     } catch {}
   };
   ws.onmessage = async (ev) => {
