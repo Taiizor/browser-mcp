@@ -31,7 +31,7 @@ const bridge = new ExtensionBridge(PORT);
 
 const server = new McpServer({
   name: "browser-mcp",
-  version: "0.3.0",
+  version: "0.3.1",
 });
 
 // ---------- helpers ----------
