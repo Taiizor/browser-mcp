@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { EmptyResultSchema, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { BridgeClient, ExtensionBridge, type IBridge } from "./bridge.js";
 
@@ -1599,6 +1600,47 @@ async function main() {
     try {
       (timer as unknown as { unref?: () => void }).unref?.();
     } catch {}
+  }
+  // Client watchdog: the agent can stay alive with our stdio pipe open while
+  // tearing down its MCP client (MCP disabled). Then there is no EOF and no
+  // dead parent — but a server->client `ping` gets no answer. Exit after
+  // consecutive ping timeouts instead of squatting on :PORT forever. Any
+  // other reply (even a method error) proves the client lives and resets
+  // the counter. Opt out with BROWSER_MCP_NO_CLIENT_PING=1.
+  if (process.env.BROWSER_MCP_NO_CLIENT_PING !== "1") {
+    const pingEvery = Number(process.env.BROWSER_MCP_CLIENT_PING_MS ?? 30000);
+    const pingTimeout = Number(process.env.BROWSER_MCP_CLIENT_PING_TIMEOUT_MS ?? 10000);
+    const failsNeededRaw = Number(process.env.BROWSER_MCP_CLIENT_PING_FAILS ?? 3);
+    const failsNeeded = Number.isFinite(failsNeededRaw) && failsNeededRaw > 0 ? Math.floor(failsNeededRaw) : 3;
+    if (Number.isFinite(pingEvery) && pingEvery > 0 && Number.isFinite(pingTimeout) && pingTimeout > 0) {
+      let fails = 0;
+      let inFlight = false;
+      const timer = setInterval(async () => {
+        if (shuttingDown || inFlight) return;
+        inFlight = true;
+        try {
+          await server.server.request({ method: "ping" }, EmptyResultSchema, { timeout: pingTimeout });
+          fails = 0;
+        } catch (e) {
+          // Only a timeout means "nobody home".
+          if ((e as { code?: number })?.code === ErrorCode.RequestTimeout) {
+            fails++;
+            console.error(`[browser-mcp] MCP client ping timeout (${fails}/${failsNeeded})`);
+            if (fails >= failsNeeded) {
+              clearInterval(timer);
+              shutdown("client-unresponsive");
+            }
+          } else {
+            fails = 0;
+          }
+        } finally {
+          inFlight = false;
+        }
+      }, pingEvery);
+      try {
+        (timer as unknown as { unref?: () => void }).unref?.();
+      } catch {}
+    }
   }
 }
 
