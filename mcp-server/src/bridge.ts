@@ -34,13 +34,25 @@ export interface BridgeStatus {
   wsPort: number;
   consoleBuffered: number;
   networkBuffered: number;
+  /** Which side of the sharing this process is. */
+  mode: "primary" | "satellite";
+  /** OS pid of the process answering (primary) or of this satellite. */
+  pid: number;
+  /**
+   * Number of non-extension sockets on the primary (satellites + CLI
+   * probes). -1 when unknown (satellite that hasn't polled yet).
+   */
+  peers: number;
 }
 
 export interface IBridge {
   readonly port: number;
   readonly connected: boolean;
+  readonly mode: "primary" | "satellite";
   consoleEvents: Array<unknown>;
   networkEvents: Array<unknown>;
+  /** Extra status fields for browser_status (mode/pid/peers). */
+  status(): Pick<BridgeStatus, "mode" | "pid" | "peers">;
   send<T = unknown>(action: string, payload?: unknown, tabId?: number, timeoutMs?: number): Promise<T>;
   launchBrowser(timeoutMs?: number): Promise<{ connected: boolean; launched: boolean; detail: string }>;
   closeBrowser(force?: boolean): Promise<{ closed: boolean; detail: string }>;
@@ -75,6 +87,9 @@ export class ExtensionBridge implements IBridge {
   // Sticky browser: the browser that last connected the extension
   // (reported via hello). Preferred on the next launch.
   private lastBrowser: BrowserId | null = null;
+  // Singleflight: N satellites may call launchBrowser concurrently while the
+  // extension is down. Without this each caller spawns its own browser(s).
+  private launchInflight: Promise<{ connected: boolean; launched: boolean; detail: string }> | null = null;
 
   //-ring buffers for pushed events (so tools work even with polling)
   consoleEvents: Array<unknown> = [];
@@ -88,7 +103,7 @@ export class ExtensionBridge implements IBridge {
     this.wss.on("connection", (ws, req) => {
       const origin = req.headers.origin;
       if (origin && !origin.startsWith("chrome-extension://") && !origin.startsWith("moz-extension://")) {
-        console.error(`[bridge] rejected unauthorized connection from origin: ${origin}`);
+        console.error(`[bridge:${process.pid}] rejected unauthorized connection from origin: ${origin}`);
         try { ws.close(1008, "Unauthorized origin"); } catch {}
         return;
       }
@@ -96,7 +111,7 @@ export class ExtensionBridge implements IBridge {
       ws.on("close", () => {
         if (this.extensionSocket === ws) {
           this.extensionSocket = null;
-          console.error(`[bridge] extension disconnected`);
+          console.error(`[bridge:${process.pid}] extension disconnected`);
           for (const [id, p] of this.pending) {
             clearTimeout(p.timer);
             p.reject(new Error("Extension disconnected"));
@@ -104,14 +119,20 @@ export class ExtensionBridge implements IBridge {
           this.pending.clear();
         }
       });
-      ws.on("error", (e) => console.error(`[bridge] ws error`, e));
+      ws.on("error", (e) => console.error(`[bridge:${process.pid}] ws error: ${(e as Error)?.message ?? e}`));
     });
     this.wss.on("error", (e) => {
-      console.error(`[bridge] wss error`, e);
       // A server that cannot bind its port is useless (and would linger as a
       // zombie holding no browser connection). Exit so the MCP client restarts us,
       // unless the caller wants to fall back to satellite (client) mode.
       const code = (e as { code?: string })?.code;
+      if (code === "EADDRINUSE" && !this.exitOnAddrInUse) {
+        // Expected on every satellite startup: keep it a one-liner, the full
+        // Bun code-frame dump looks like a crash and scares users.
+        console.error(`[bridge:${process.pid}] port ${port} in use, will join as satellite`);
+      } else {
+        console.error(`[bridge:${process.pid}] wss error`, e);
+      }
       if (!this.readySettled) {
         this.readySettled = true;
         if (code === "EADDRINUSE" && !this.exitOnAddrInUse) {
@@ -125,7 +146,7 @@ export class ExtensionBridge implements IBridge {
       if (code === "EADDRINUSE" && this.exitOnAddrInUse) process.exit(1);
     });
     this.wss.on("listening", () => {
-      console.error(`[bridge] ws listening on ws://127.0.0.1:${port}`);
+      console.error(`[bridge:${process.pid}] ws listening on ws://127.0.0.1:${port} (primary)`);
       if (!this.readySettled) {
         this.readySettled = true;
         this.readyResolve?.();
@@ -155,10 +176,29 @@ export class ExtensionBridge implements IBridge {
     );
   }
 
+  get mode(): "primary" | "satellite" {
+    return "primary";
+  }
+
+  /** Non-extension sockets on this bridge (satellites + probes). */
+  peerCount(): number {
+    try {
+      const total = this.wss.clients.size;
+      return Math.max(0, total - (this.connected ? 1 : 0));
+    } catch {
+      return 0;
+    }
+  }
+
+  status(): Pick<BridgeStatus, "mode" | "pid" | "peers"> {
+    return { mode: "primary", pid: process.pid, peers: this.peerCount() };
+  }
+
   private claimExtension(ws: WebSocket) {
     if (this.extensionSocket !== ws) {
       this.extensionSocket = ws;
-      console.error(`[bridge] extension connected`);
+      const peers = this.peerCount();
+      console.error(`[bridge:${process.pid}] extension connected (peers=${peers})`);
     }
   }
 
@@ -231,6 +271,9 @@ export class ExtensionBridge implements IBridge {
           wsPort: this.port,
           consoleBuffered: this.consoleEvents.length,
           networkBuffered: this.networkEvents.length,
+          mode: "primary",
+          pid: process.pid,
+          peers: this.peerCount(),
         } satisfies BridgeStatus);
         return;
       }
@@ -307,7 +350,7 @@ export class ExtensionBridge implements IBridge {
         const b = this.resolveBrowserBin(id);
         if (b) return b;
       }
-      console.error(`[bridge] unknown BROWSER=${JSON.stringify(name)} (want chrome|edge|brave|opera or a binary path), ignoring`);
+      console.error(`[bridge:${process.pid}] unknown BROWSER=${JSON.stringify(name)} (want chrome|edge|brave|opera or a binary path), ignoring`);
     }
     if (process.env.CHROME_PATH) {
       const r = byPath(process.env.CHROME_PATH);
@@ -318,6 +361,18 @@ export class ExtensionBridge implements IBridge {
 
   /** Start the browser (if needed) and wait for the extension to connect. */
   async launchBrowser(timeoutMs?: number): Promise<{ connected: boolean; launched: boolean; detail: string }> {
+    if (this.connected) return { connected: true, launched: false, detail: "Extension already connected." };
+    // Singleflight: join the in-flight launch instead of spawning more browsers.
+    if (this.launchInflight) return await this.launchInflight;
+    this.launchInflight = this.launchBrowserInner(timeoutMs);
+    try {
+      return await this.launchInflight;
+    } finally {
+      this.launchInflight = null;
+    }
+  }
+
+  private async launchBrowserInner(timeoutMs?: number): Promise<{ connected: boolean; launched: boolean; detail: string }> {
     if (this.connected) return { connected: true, launched: false, detail: "Extension already connected." };
     const wait = timeoutMs ?? this.launchTimeoutMs;
     const deadline = Date.now() + wait;
@@ -780,6 +835,8 @@ export class BridgeClient implements IBridge {
   private reconnectTimer: Timer | null = null;
   private closed = false;
   private extensionConnected = true;
+  /** Last peer count reported by the primary (-1 = unknown yet). */
+  private lastPeers = -1;
 
   constructor(port: number) {
     this.port = port;
@@ -801,6 +858,16 @@ export class BridgeClient implements IBridge {
   get connected(): boolean {
     if (this.primary) return this.primary.connected;
     return !!this.ws && this.ws.readyState === WebSocket.OPEN && this.extensionConnected;
+  }
+
+  get mode(): "primary" | "satellite" {
+    // A promoted satellite behaves as the primary for its agent.
+    return this.primary ? "primary" : "satellite";
+  }
+
+  status(): Pick<BridgeStatus, "mode" | "pid" | "peers"> {
+    if (this.primary) return this.primary.status();
+    return { mode: "satellite", pid: process.pid, peers: this.lastPeers };
   }
 
   /** Raw link state (ignores extension status) — used internally for polling. */
@@ -827,11 +894,14 @@ export class BridgeClient implements IBridge {
     }
     this.ws = ws;
     ws.on("open", () => {
-      console.error(`[bridge] satellite connected to primary on :${this.port}`);
+      console.error(`[bridge:${process.pid}] satellite connected to primary on :${this.port}`);
       // Fetch real extension status before marking ready so `connected`
       // is accurate from the start instead of optimistically true.
       this.send<BridgeStatus>("__bridge_status", {}, undefined, 8000).then(
-        (s) => { this.extensionConnected = !!s?.connected; },
+        (s) => {
+          this.extensionConnected = !!s?.connected;
+          if (typeof s?.peers === "number") this.lastPeers = s.peers;
+        },
         () => { /* keep default; link errors surface via close */ }
       ).finally(() => {
         this.settleReady();
@@ -858,7 +928,7 @@ export class BridgeClient implements IBridge {
     const onDown = (e?: unknown) => {
       if (this.ws === ws) this.ws = null;
       else return;
-      console.error(`[bridge] satellite link down on :${this.port}, failing over`);
+      console.error(`[bridge:${process.pid}] satellite link down on :${this.port}, failing over`);
       if (!this.readySettled) {
         this.settleReady((e as Error) ?? new Error(`Cannot reach primary bridge on :${this.port}`));
       }
@@ -874,7 +944,8 @@ export class BridgeClient implements IBridge {
     };
     ws.on("close", () => onDown(new Error(`Primary bridge on :${this.port} closed`)));
     ws.on("error", (e) => {
-      console.error(`[bridge] satellite ws error`, e);
+      const msg = (e as Error)?.message ?? String(e);
+      console.error(`[bridge:${process.pid}] satellite ws error: ${msg}`);
       if (!this.readySettled) {
         try { ws.close(); } catch {}
         onDown(e);
@@ -884,22 +955,50 @@ export class BridgeClient implements IBridge {
 
   private scheduleFailover() {
     if (this.closed || this.primary || this.reconnectTimer) return;
-    // Old primary may have exited: first try to bind the port ourselves
-    // (promote). If someone else owns it, rejoin as a client.
+    // Jittered delay: N satellites losing the primary at once must not all
+    // bind() in the same millisecond (thundering herd). Spread 1.2–3.2s.
+    const delay = 1200 + Math.random() * 2000;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       this.attemptPrimary();
-    }, 1500);
+    }, delay);
+  }
+
+  /**
+   * True when this process still has a live owner (parent + stdio + MCP
+   * client). A satellite whose own agent is already gone must exit instead
+   * of hijacking the shared port as a zombie primary.
+   */
+  private selfHealthy(): boolean {
+    if (this.closed) return false;
+    try {
+      if (process.stdin && (process.stdin as unknown as { destroyed?: boolean }).destroyed) return false;
+    } catch {}
+    try {
+      const ppid = process.ppid;
+      if (ppid && ppid > 1) process.kill(ppid, 0);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException)?.code === "ESRCH") return false;
+    }
+    return true;
   }
 
   private attemptPrimary() {
     if (this.closed || this.primary) return;
-    console.error(`[bridge] satellite attempting takeover on :${this.port}`);
+    if (!this.selfHealthy()) {
+      // Our own agent is gone: do not squat on the shared port. Exit so the
+      // OS/manager can reap us; a healthy sibling will take over if needed.
+      console.error(`[bridge:${process.pid}] satellite unhealthy, exiting instead of takeover on :${this.port}`);
+      try { this.close(); } catch {}
+      setTimeout(() => process.exit(0), 100).unref?.();
+      return;
+    }
+    console.error(`[bridge:${process.pid}] satellite attempting takeover on :${this.port}`);
     let candidate: ExtensionBridge;
     try {
       candidate = new ExtensionBridge(this.port, { exitOnAddrInUse: false });
     } catch (e) {
-      console.error(`[bridge] takeover bind threw, rejoining as client`, e);
+      console.error(`[bridge:${process.pid}] takeover bind threw, rejoining as client`, e);
       if (!this.closed) this.connect();
       return;
     }
@@ -910,13 +1009,13 @@ export class BridgeClient implements IBridge {
           return;
         }
         this.primary = candidate;
-        console.error(`[bridge] satellite promoted to primary on :${this.port}`);
+        console.error(`[bridge:${process.pid}] satellite promoted to primary on :${this.port}`);
         try { this.ws?.close(); } catch {}
         this.ws = null;
         this.stopStatusPoll();
       },
       (e) => {
-        console.error(`[bridge] takeover failed (${(e as Error)?.message}), rejoining as client`);
+        console.error(`[bridge:${process.pid}] takeover failed (${(e as Error)?.message}), rejoining as client`);
         try { candidate.close(); } catch {}
         if (this.closed) return;
         this.connect();
@@ -933,7 +1032,10 @@ export class BridgeClient implements IBridge {
     const poll = () => {
       if (this.closed || !this.linkOpen) return;
       this.send<BridgeStatus>("__bridge_status", {}, undefined, 8000).then(
-        (s) => { this.extensionConnected = !!s?.connected; },
+        (s) => {
+          this.extensionConnected = !!s?.connected;
+          if (typeof s?.peers === "number") this.lastPeers = s.peers;
+        },
         () => { /* keep last known value; link errors surface via close */ }
       );
     };

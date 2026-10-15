@@ -1,6 +1,6 @@
 {
   "name": "browser-mcp-server",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Chromium extension bridge MCP server - full browser automation (tabs, DOM, network, console)",
   "type": "module",
   "scripts": {

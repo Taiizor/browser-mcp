@@ -45,20 +45,23 @@ function parseBrowser(): string | undefined {
 // Multi-agent sharing: the first process owns the WS bridge (primary),
 // later processes join it as satellite clients instead of failing on
 // EADDRINUSE. All satellites relay through the single extension socket.
+// NOTE: stdio MCP requires one OS process per MCP client session, so N agent
+// sessions = N processes (1 primary + N-1 satellites) sharing one browser.
+// That is expected — see browser_status (mode/pid/peers) to tell them apart.
 async function createBridge(port: number): Promise<IBridge> {
   const primary = new ExtensionBridge(port, { exitOnAddrInUse: false });
   try {
     await primary.ready();
-    console.error(`[browser-mcp] primary bridge on :${port}`);
+    console.error(`[browser-mcp:${process.pid}] primary bridge on :${port} (ppid=${process.ppid})`);
     return primary;
   } catch {
-    console.error(`[browser-mcp] port ${port} in use, joining as satellite client`);
+    console.error(`[browser-mcp:${process.pid}] port ${port} in use, joining as satellite client`);
     try {
       primary.close();
     } catch {}
     const client = new BridgeClient(port);
     await client.ready();
-    console.error(`[browser-mcp] satellite connected to primary on :${port}`);
+    console.error(`[browser-mcp:${process.pid}] satellite connected to primary on :${port}`);
     return client;
   }
 }
@@ -67,7 +70,7 @@ let bridge: IBridge;
 
 const server = new McpServer({
   name: "browser-mcp",
-  version: "0.3.2",
+  version: "0.3.3",
 });
 
 // ---------- helpers ----------
@@ -84,12 +87,13 @@ function textResult(obj: unknown): { content: { type: "text"; text: string }[] }
 }
 
 // ---------- status ----------
-server.tool("browser_status", "Check whether the browser extension is connected and show bridge status", {}, async () => {
+server.tool("browser_status", "Check whether the browser extension is connected and show bridge status (mode=primary|satellite, pid, peers=satellites sharing this bridge)", {}, async () => {
   return textResult({
     connected: bridge.connected,
     wsPort: PORT,
     consoleBuffered: bridge.consoleEvents.length,
     networkBuffered: bridge.networkEvents.length,
+    ...bridge.status(),
   });
 });
 
@@ -452,7 +456,7 @@ server.tool(
       );
       return textResult(r);
     } catch (e) {
-      // Old extensions (<0.3.2) evaluated via content-script new Function,
+      // Old extensions (<0.3.3) evaluated via content-script new Function,
       // blocked by the extension CSP (no 'unsafe-eval'). Fallback keeps them
       // working: Runtime.evaluate over the debugger (unaffected by CSP).
       if (!/Content Security Policy|unsafe-eval|Evaluating a string|handled via CDP/i.test(String((e as Error)?.message ?? e))) {
@@ -1506,6 +1510,7 @@ server.resource("status", "browser://status", async (uri) => ({
       wsPort: bridge.port,
       consoleBuffered: bridge.consoleEvents.length,
       networkBuffered: bridge.networkEvents.length,
+      ...bridge.status(),
     }, null, 2),
   }],
 }));
@@ -1628,7 +1633,7 @@ async function main() {
   const shutdown = (reason: string) => {
     if (shuttingDown) return;
     shuttingDown = true;
-    console.error(`[browser-mcp] shutting down (${reason})`);
+    console.error(`[browser-mcp:${process.pid}] shutting down (${reason})`);
     try {
       bridge.close();
     } catch {}
@@ -1641,7 +1646,7 @@ async function main() {
   // Preserved across server.connect() (Protocol wraps a pre-set handler).
   transport.onclose = () => shutdown("transport-close");
   await server.connect(transport);
-  console.error(`[browser-mcp] stdio ready, ws bridge on :${PORT}`);
+  console.error(`[browser-mcp:${process.pid}] stdio ready, ws bridge on :${PORT} mode=${bridge.mode}`);
 
   process.on("SIGINT", () => shutdown("SIGINT"));
   process.on("SIGTERM", () => shutdown("SIGTERM"));
@@ -1714,7 +1719,7 @@ async function main() {
           // Only a timeout means "nobody home".
           if ((e as { code?: number })?.code === ErrorCode.RequestTimeout) {
             fails++;
-            console.error(`[browser-mcp] MCP client ping timeout (${fails}/${failsNeeded})`);
+            console.error(`[browser-mcp:${process.pid}] MCP client ping timeout (${fails}/${failsNeeded})`);
             if (fails >= failsNeeded) {
               clearInterval(timer);
               shutdown("client-unresponsive");
