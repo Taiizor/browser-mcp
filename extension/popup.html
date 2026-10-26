@@ -78,7 +78,7 @@
   .sw input:focus-visible + i { box-shadow: 0 0 0 3px rgba(59,130,246,.3); }
   .cat-h .sw { pointer-events: none; }
   .cat-h .sw input { pointer-events: auto; }
-  footer { padding: 8px 16px 10px; font-size: 11.5px; color: var(--muted-fg); border-top: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 8px; background: rgba(9,9,11,.92); }
+  footer { position: relative; z-index: 10; padding: 8px 16px 10px; font-size: 11.5px; color: var(--muted-fg); border-top: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 8px; background: rgba(9,9,11,.92); }
   .port-row { display: inline-flex; align-items: center; gap: 6px; }
   .port-row .fdot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); flex-shrink: 0; }
   .port-row label { font-weight: 500; color: var(--muted); font-size: 11px; cursor: pointer; }
@@ -90,10 +90,29 @@
   .btn-xs:hover { background: var(--card-hover); border-color: #3f3f46; }
   .btn-xs:active { transform: translateY(1px); }
   .f-info { font-size: 10.5px; color: var(--muted-fg); white-space: nowrap; }
-  .lang-select { background: var(--card); border: 1px solid var(--border); color: var(--muted); border-radius: 6px; padding: 2px 6px; font-size: 11px; outline: none; cursor: pointer; transition: border-color .15s, color .15s; }
-  .lang-select:hover { border-color: #3f3f46; color: var(--foreground); }
-  .lang-select:focus { border-color: var(--primary); }
-  .lang-select option { background: #18181b; color: var(--foreground); }
+  /* Custom Shadcn-style Language Dropdown */
+  .lang-dropdown { position: relative; }
+  .lang-btn { display: inline-flex; align-items: center; gap: 5px; background: var(--card); border: 1px solid var(--border); color: var(--foreground); border-radius: 6px; padding: 3px 8px; height: 24px; font-size: 11px; font-weight: 500; cursor: pointer; transition: background .15s, border-color .15s, color .15s, box-shadow .15s; user-select: none; outline: none; }
+  .lang-btn:hover { background: var(--card-hover); border-color: #3f3f46; }
+  .lang-btn:focus-visible, .lang-btn.open { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(59,130,246,.2); }
+  .lang-globe { width: 12px; height: 12px; color: var(--muted-fg); flex-shrink: 0; }
+  .lang-current { font-size: 11px; color: var(--foreground); white-space: nowrap; max-width: 65px; overflow: hidden; text-overflow: ellipsis; }
+  .lang-arrow { width: 11px; height: 11px; color: var(--muted-fg); transition: transform .18s ease; flex-shrink: 0; }
+  .lang-btn.open .lang-arrow { transform: rotate(180deg); color: var(--foreground); }
+
+  .lang-menu { position: absolute; bottom: calc(100% + 6px); right: 0; width: 140px; max-height: 220px; overflow-y: auto; background: #111114; border: 1px solid var(--border); border-radius: 8px; padding: 4px; box-shadow: 0 10px 25px -5px rgba(0,0,0,.6), 0 8px 10px -6px rgba(0,0,0,.5); display: none; flex-direction: column; gap: 1px; z-index: 100; backdrop-filter: blur(12px); }
+  .lang-menu::-webkit-scrollbar { width: 4px; }
+  .lang-menu::-webkit-scrollbar-track { background: transparent; }
+  .lang-menu::-webkit-scrollbar-thumb { background: #27272a; border-radius: 4px; }
+  .lang-menu::-webkit-scrollbar-thumb:hover { background: #3f3f46; }
+  .lang-menu.show { display: flex; animation: menuIn .14s cubic-bezier(0.16, 1, 0.3, 1); }
+  @keyframes menuIn { from { opacity: 0; transform: translateY(4px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+
+  .lang-item { display: flex; align-items: center; justify-content: space-between; padding: 5px 8px; border-radius: 5px; font-size: 11.5px; color: var(--muted); cursor: pointer; user-select: none; transition: background .12s, color .12s; }
+  .lang-item:hover { background: var(--card-hover); color: var(--foreground); }
+  .lang-item.selected { color: #93c5fd; font-weight: 500; background: rgba(59,130,246,.1); }
+  .lang-item .check { width: 12px; height: 12px; color: var(--primary); opacity: 0; flex-shrink: 0; }
+  .lang-item.selected .check { opacity: 1; }
   .empty { padding: 22px; text-align: center; color: var(--muted-fg); font-size: 12.5px; }
 
   /* Active tab bar */
@@ -182,19 +201,63 @@
     <button id="portSave" class="btn-xs" data-i18n-title="portSaveTitle" title="Apply Port & Reconnect" data-i18n="portSaveBtn">Set</button>
     <button id="portReset" class="btn-xs" data-i18n-title="portResetTitle" title="Reset to default 8765">↺</button>
   </div>
-  <select id="langSelect" class="lang-select" data-i18n-title="langSelectTitle" title="Language">
-    <option value="auto" data-i18n="langAuto">🌐 Auto</option>
-    <option value="en">English</option>
-    <option value="tr">Türkçe</option>
-    <option value="es">Español</option>
-    <option value="de">Deutsch</option>
-    <option value="fr">Français</option>
-    <option value="pt_BR">Português</option>
-    <option value="it">Italiano</option>
-    <option value="ru">Русский</option>
-    <option value="ja">日本語</option>
-    <option value="ko">한국어</option>
-  </select>
+  <div class="lang-dropdown" id="langDropdown">
+    <button type="button" class="lang-btn" id="langBtn" data-i18n-title="langSelectTitle" title="Language" aria-haspopup="listbox" aria-expanded="false">
+      <svg class="lang-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>
+      </svg>
+      <span id="langCurrentText" class="lang-current">Türkçe</span>
+      <svg class="lang-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="m6 9 6 6 6-6"/>
+      </svg>
+    </button>
+    <div class="lang-menu" id="langMenu" role="listbox">
+      <div class="lang-item" data-val="auto">
+        <span data-i18n="langAuto">🌐 Auto</span>
+        <svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+      </div>
+      <div class="lang-item" data-val="en">
+        <span>English</span>
+        <svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+      </div>
+      <div class="lang-item" data-val="tr">
+        <span>Türkçe</span>
+        <svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+      </div>
+      <div class="lang-item" data-val="es">
+        <span>Español</span>
+        <svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+      </div>
+      <div class="lang-item" data-val="de">
+        <span>Deutsch</span>
+        <svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+      </div>
+      <div class="lang-item" data-val="fr">
+        <span>Français</span>
+        <svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+      </div>
+      <div class="lang-item" data-val="pt_BR">
+        <span>Português</span>
+        <svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+      </div>
+      <div class="lang-item" data-val="it">
+        <span>Italiano</span>
+        <svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+      </div>
+      <div class="lang-item" data-val="ru">
+        <span>Русский</span>
+        <svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+      </div>
+      <div class="lang-item" data-val="ja">
+        <span>日本語</span>
+        <svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+      </div>
+      <div class="lang-item" data-val="ko">
+        <span>한국어</span>
+        <svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+      </div>
+    </div>
+  </div>
 </footer>
 <script src="i18n.js"></script>
 <script src="popup.js"></script>
