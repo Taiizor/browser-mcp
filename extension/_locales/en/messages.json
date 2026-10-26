@@ -1,0 +1,182 @@
+{
+  "extName": {
+    "message": "Browser MCP Bridge",
+    "description": "Extension name"
+  },
+  "extDescription": {
+    "message": "Full-authority browser bridge for MCP servers: DOM, tabs, network, console, CDP.",
+    "description": "Extension description"
+  },
+  "actionTitle": {
+    "message": "Browser MCP",
+    "description": "Popup action title"
+  },
+  "statusConnected": {
+    "message": "Connected",
+    "description": "Status badge when connected"
+  },
+  "statusNoServer": {
+    "message": "No server",
+    "description": "Status badge when no server"
+  },
+  "statusError": {
+    "message": "Error",
+    "description": "Status badge when error"
+  },
+  "statusConnecting": {
+    "message": "Connecting…",
+    "description": "Status badge while connecting"
+  },
+  "activeTabTag": {
+    "message": "🌐 Tab",
+    "description": "Active tab prefix"
+  },
+  "tabPermissions": {
+    "message": "Permissions",
+    "description": "Navigation button for permissions"
+  },
+  "tabRecentCommands": {
+    "message": "Recent Commands",
+    "description": "Navigation button for recent commands"
+  },
+  "searchPlaceholder": {
+    "message": "Search permissions…",
+    "description": "Search input placeholder"
+  },
+  "btnAll": {
+    "message": "All",
+    "description": "Enable all button"
+  },
+  "btnNone": {
+    "message": "None",
+    "description": "Disable all button"
+  },
+  "noResults": {
+    "message": "No results",
+    "description": "Search no results text"
+  },
+  "executionHistory": {
+    "message": "Execution History",
+    "description": "History section title"
+  },
+  "btnClear": {
+    "message": "Clear",
+    "description": "Clear history button"
+  },
+  "noCommands": {
+    "message": "No commands executed yet",
+    "description": "Empty history list message"
+  },
+  "executionFailed": {
+    "message": "Execution failed",
+    "description": "Fallback error message"
+  },
+  "tabBadgePrefix": {
+    "message": "Tab #",
+    "description": "Tab badge prefix"
+  },
+  "portLabel": {
+    "message": "Port:",
+    "description": "Port input label"
+  },
+  "portSaveBtn": {
+    "message": "Set",
+    "description": "Apply port button"
+  },
+  "portSaveTitle": {
+    "message": "Apply Port & Reconnect",
+    "description": "Apply port tooltip"
+  },
+  "portResetTitle": {
+    "message": "Reset to default 8765",
+    "description": "Reset port tooltip"
+  },
+  "instantSync": {
+    "message": "Instant sync",
+    "description": "Instant sync notice"
+  },
+  "langSelectTitle": {
+    "message": "Language",
+    "description": "Language selector tooltip"
+  },
+  "langAuto": {
+    "message": "🌐 Auto",
+    "description": "Auto language label"
+  },
+  "cat_tabs": {
+    "message": "Tabs & Windows",
+    "description": "Category: Tabs & Windows"
+  },
+  "cat_read": {
+    "message": "Page: Read",
+    "description": "Category: Page Read"
+  },
+  "cat_interact": {
+    "message": "Page: Interact",
+    "description": "Category: Page Interact"
+  },
+  "cat_media": {
+    "message": "Media",
+    "description": "Category: Media"
+  },
+  "cat_console": {
+    "message": "Console",
+    "description": "Category: Console"
+  },
+  "cat_network": {
+    "message": "Network: Observe",
+    "description": "Category: Network Observe"
+  },
+  "cat_mock": {
+    "message": "Network: Intercept",
+    "description": "Category: Network Intercept"
+  },
+  "cat_downloads": {
+    "message": "Downloads",
+    "description": "Category: Downloads"
+  },
+  "cat_bookmarks": {
+    "message": "Bookmarks",
+    "description": "Category: Bookmarks"
+  },
+  "cat_cookies": {
+    "message": "Cookies",
+    "description": "Category: Cookies"
+  },
+  "cat_storage": {
+    "message": "Storage",
+    "description": "Category: Storage"
+  },
+  "cat_sessions": {
+    "message": "Sessions & State",
+    "description": "Category: Sessions & State"
+  },
+  "cat_dialogs": {
+    "message": "Dialogs",
+    "description": "Category: Dialogs"
+  },
+  "cat_power": {
+    "message": "Power (arbitrary code)",
+    "description": "Category: Power"
+  },
+  "cat_trusted": {
+    "message": "Trusted Input (CDP)",
+    "description": "Category: Trusted Input"
+  },
+  "cat_clipboard": {
+    "message": "Clipboard",
+    "description": "Category: Clipboard"
+  },
+  "cat_browsing_data": {
+    "message": "Browsing Data",
+    "description": "Category: Browsing Data"
+  },
+  "cat_notifications": {
+    "message": "Notifications",
+    "description": "Category: Notifications"
+  },
+  "cat_system": {
+    "message": "System",
+    "description": "Category: System"
+  }
+}

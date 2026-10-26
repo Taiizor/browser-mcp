@@ -1,0 +1,182 @@
+{
+  "extName": {
+    "message": "Browser MCP Bridge",
+    "description": "Extension name"
+  },
+  "extDescription": {
+    "message": "MCPサーバー用の完全権限ブラウザブリッジ: DOM、タブ、ネットワーク、コンソール、CDP。",
+    "description": "Extension description"
+  },
+  "actionTitle": {
+    "message": "Browser MCP",
+    "description": "Popup action title"
+  },
+  "statusConnected": {
+    "message": "接続済み",
+    "description": "Status badge when connected"
+  },
+  "statusNoServer": {
+    "message": "サーバーなし",
+    "description": "Status badge when no server"
+  },
+  "statusError": {
+    "message": "エラー",
+    "description": "Status badge when error"
+  },
+  "statusConnecting": {
+    "message": "接続中…",
+    "description": "Status badge while connecting"
+  },
+  "activeTabTag": {
+    "message": "🌐 タブ",
+    "description": "Active tab prefix"
+  },
+  "tabPermissions": {
+    "message": "権限",
+    "description": "Navigation button for permissions"
+  },
+  "tabRecentCommands": {
+    "message": "最近のコマンド",
+    "description": "Navigation button for recent commands"
+  },
+  "searchPlaceholder": {
+    "message": "権限を検索…",
+    "description": "Search input placeholder"
+  },
+  "btnAll": {
+    "message": "すべて",
+    "description": "Enable all button"
+  },
+  "btnNone": {
+    "message": "なし",
+    "description": "Disable all button"
+  },
+  "noResults": {
+    "message": "結果が見つかりません",
+    "description": "Search no results text"
+  },
+  "executionHistory": {
+    "message": "実行履歴",
+    "description": "History section title"
+  },
+  "btnClear": {
+    "message": "クリア",
+    "description": "Clear history button"
+  },
+  "noCommands": {
+    "message": "まだ実行されたコマンドはありません",
+    "description": "Empty history list message"
+  },
+  "executionFailed": {
+    "message": "実行に失敗しました",
+    "description": "Fallback error message"
+  },
+  "tabBadgePrefix": {
+    "message": "タブ #",
+    "description": "Tab badge prefix"
+  },
+  "portLabel": {
+    "message": "ポート:",
+    "description": "Port input label"
+  },
+  "portSaveBtn": {
+    "message": "設定",
+    "description": "Apply port button"
+  },
+  "portSaveTitle": {
+    "message": "ポートを適用して再接続",
+    "description": "Apply port tooltip"
+  },
+  "portResetTitle": {
+    "message": "デフォルトの8765にリセット",
+    "description": "Reset port tooltip"
+  },
+  "instantSync": {
+    "message": "即時同期",
+    "description": "Instant sync notice"
+  },
+  "langSelectTitle": {
+    "message": "言語",
+    "description": "Language selector tooltip"
+  },
+  "langAuto": {
+    "message": "🌐 自動",
+    "description": "Auto language label"
+  },
+  "cat_tabs": {
+    "message": "タブとウィンドウ",
+    "description": "Category: Tabs & Windows"
+  },
+  "cat_read": {
+    "message": "ページ: 読み込み",
+    "description": "Category: Page Read"
+  },
+  "cat_interact": {
+    "message": "ページ: 操作",
+    "description": "Category: Page Interact"
+  },
+  "cat_media": {
+    "message": "メディア",
+    "description": "Category: Media"
+  },
+  "cat_console": {
+    "message": "コンソール",
+    "description": "Category: Console"
+  },
+  "cat_network": {
+    "message": "ネットワーク: 監視",
+    "description": "Category: Network Observe"
+  },
+  "cat_mock": {
+    "message": "ネットワーク: 遮断・モック",
+    "description": "Category: Network Intercept"
+  },
+  "cat_downloads": {
+    "message": "ダウンロード",
+    "description": "Category: Downloads"
+  },
+  "cat_bookmarks": {
+    "message": "ブックマーク",
+    "description": "Category: Bookmarks"
+  },
+  "cat_cookies": {
+    "message": "Cookie",
+    "description": "Category: Cookies"
+  },
+  "cat_storage": {
+    "message": "ストレージ",
+    "description": "Category: Storage"
+  },
+  "cat_sessions": {
+    "message": "セッションと状態",
+    "description": "Category: Sessions & State"
+  },
+  "cat_dialogs": {
+    "message": "ダイアログ",
+    "description": "Category: Dialogs"
+  },
+  "cat_power": {
+    "message": "拡張コード (任意コード実行)",
+    "description": "Category: Power"
+  },
+  "cat_trusted": {
+    "message": "信頼された入力 (CDP)",
+    "description": "Category: Trusted Input"
+  },
+  "cat_clipboard": {
+    "message": "クリップボード",
+    "description": "Category: Clipboard"
+  },
+  "cat_browsing_data": {
+    "message": "閲覧データ",
+    "description": "Category: Browsing Data"
+  },
+  "cat_notifications": {
+    "message": "通知",
+    "description": "Category: Notifications"
+  },
+  "cat_system": {
+    "message": "システム",
+    "description": "Category: System"
+  }
+}

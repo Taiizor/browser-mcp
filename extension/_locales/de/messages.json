@@ -1,0 +1,182 @@
+{
+  "extName": {
+    "message": "Browser-MCP-Brücke",
+    "description": "Extension name"
+  },
+  "extDescription": {
+    "message": "Vollwertige Browser-Brücke für MCP-Server: DOM, Tabs, Netzwerk, Konsole, CDP.",
+    "description": "Extension description"
+  },
+  "actionTitle": {
+    "message": "Browser MCP",
+    "description": "Popup action title"
+  },
+  "statusConnected": {
+    "message": "Verbunden",
+    "description": "Status badge when connected"
+  },
+  "statusNoServer": {
+    "message": "Kein Server",
+    "description": "Status badge when no server"
+  },
+  "statusError": {
+    "message": "Fehler",
+    "description": "Status badge when error"
+  },
+  "statusConnecting": {
+    "message": "Verbindung wird hergestellt…",
+    "description": "Status badge while connecting"
+  },
+  "activeTabTag": {
+    "message": "🌐 Tab",
+    "description": "Active tab prefix"
+  },
+  "tabPermissions": {
+    "message": "Berechtigungen",
+    "description": "Navigation button for permissions"
+  },
+  "tabRecentCommands": {
+    "message": "Letzte Befehle",
+    "description": "Navigation button for recent commands"
+  },
+  "searchPlaceholder": {
+    "message": "Berechtigungen suchen…",
+    "description": "Search input placeholder"
+  },
+  "btnAll": {
+    "message": "Alle",
+    "description": "Enable all button"
+  },
+  "btnNone": {
+    "message": "Keine",
+    "description": "Disable all button"
+  },
+  "noResults": {
+    "message": "Keine Ergebnisse",
+    "description": "Search no results text"
+  },
+  "executionHistory": {
+    "message": "Ausführungsverlauf",
+    "description": "History section title"
+  },
+  "btnClear": {
+    "message": "Leeren",
+    "description": "Clear history button"
+  },
+  "noCommands": {
+    "message": "Noch keine Befehle ausgeführt",
+    "description": "Empty history list message"
+  },
+  "executionFailed": {
+    "message": "Ausführung fehlgeschlagen",
+    "description": "Fallback error message"
+  },
+  "tabBadgePrefix": {
+    "message": "Tab #",
+    "description": "Tab badge prefix"
+  },
+  "portLabel": {
+    "message": "Port:",
+    "description": "Port input label"
+  },
+  "portSaveBtn": {
+    "message": "Setzen",
+    "description": "Apply port button"
+  },
+  "portSaveTitle": {
+    "message": "Port anwenden & neu verbinden",
+    "description": "Apply port tooltip"
+  },
+  "portResetTitle": {
+    "message": "Auf Standard 8765 zurücksetzen",
+    "description": "Reset port tooltip"
+  },
+  "instantSync": {
+    "message": "Sofortige Synchronisierung",
+    "description": "Instant sync notice"
+  },
+  "langSelectTitle": {
+    "message": "Sprache",
+    "description": "Language selector tooltip"
+  },
+  "langAuto": {
+    "message": "🌐 Automatisch",
+    "description": "Auto language label"
+  },
+  "cat_tabs": {
+    "message": "Tabs & Fenster",
+    "description": "Category: Tabs & Windows"
+  },
+  "cat_read": {
+    "message": "Seite: Lesen",
+    "description": "Category: Page Read"
+  },
+  "cat_interact": {
+    "message": "Seite: Interaktion",
+    "description": "Category: Page Interact"
+  },
+  "cat_media": {
+    "message": "Medien",
+    "description": "Category: Media"
+  },
+  "cat_console": {
+    "message": "Konsole",
+    "description": "Category: Console"
+  },
+  "cat_network": {
+    "message": "Netzwerk: Beobachten",
+    "description": "Category: Network Observe"
+  },
+  "cat_mock": {
+    "message": "Netzwerk: Abfangen",
+    "description": "Category: Network Intercept"
+  },
+  "cat_downloads": {
+    "message": "Downloads",
+    "description": "Category: Downloads"
+  },
+  "cat_bookmarks": {
+    "message": "Lesezeichen",
+    "description": "Category: Bookmarks"
+  },
+  "cat_cookies": {
+    "message": "Cookies",
+    "description": "Category: Cookies"
+  },
+  "cat_storage": {
+    "message": "Speicher",
+    "description": "Category: Storage"
+  },
+  "cat_sessions": {
+    "message": "Sitzungen & Zustand",
+    "description": "Category: Sessions & State"
+  },
+  "cat_dialogs": {
+    "message": "Dialoge",
+    "description": "Category: Dialogs"
+  },
+  "cat_power": {
+    "message": "Erweiterter Code (beliebig)",
+    "description": "Category: Power"
+  },
+  "cat_trusted": {
+    "message": "Vertrauenswürdige Eingabe (CDP)",
+    "description": "Category: Trusted Input"
+  },
+  "cat_clipboard": {
+    "message": "Zwischenablage",
+    "description": "Category: Clipboard"
+  },
+  "cat_browsing_data": {
+    "message": "Browserdaten",
+    "description": "Category: Browsing Data"
+  },
+  "cat_notifications": {
+    "message": "Benachrichtigungen",
+    "description": "Category: Notifications"
+  },
+  "cat_system": {
+    "message": "System",
+    "description": "Category: System"
+  }
+}

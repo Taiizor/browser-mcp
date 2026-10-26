@@ -90,6 +90,10 @@
   .btn-xs:hover { background: var(--card-hover); border-color: #3f3f46; }
   .btn-xs:active { transform: translateY(1px); }
   .f-info { font-size: 10.5px; color: var(--muted-fg); white-space: nowrap; }
+  .lang-select { background: var(--card); border: 1px solid var(--border); color: var(--muted); border-radius: 6px; padding: 2px 6px; font-size: 11px; outline: none; cursor: pointer; transition: border-color .15s, color .15s; }
+  .lang-select:hover { border-color: #3f3f46; color: var(--foreground); }
+  .lang-select:focus { border-color: var(--primary); }
+  .lang-select option { background: #18181b; color: var(--foreground); }
   .empty { padding: 22px; text-align: center; color: var(--muted-fg); font-size: 12.5px; }
 
   /* Active tab bar */
@@ -136,19 +140,19 @@
 <body>
 <header>
   <img src="icons/icon.svg" alt="" />
-  <div class="t"><b>Browser MCP Bridge</b><span id="ver"></span></div>
+  <div class="t"><b data-i18n="extName">Browser MCP Bridge</b><span id="ver"></span></div>
   <div id="pill" class="badge off"><span class="dot"></span><span id="pillTx">…</span></div>
 </header>
 <div id="activeBar" class="active-bar" style="display:none">
-  <span class="active-tag">🌐 Tab</span>
+  <span id="activeTag" class="active-tag" data-i18n="activeTabTag">🌐 Tab</span>
   <span id="activeTitle" class="active-title">…</span>
 </div>
 <div class="tab-nav">
   <button id="navPerms" class="tab-nav-btn active">
-    <span>Permissions</span>
+    <span data-i18n="tabPermissions">Permissions</span>
   </button>
   <button id="navHistory" class="tab-nav-btn">
-    <span>Recent Commands</span>
+    <span data-i18n="tabRecentCommands">Recent Commands</span>
     <span id="histBadge" class="nav-badge">0</span>
   </button>
 </div>
@@ -156,30 +160,43 @@
   <div class="toolbar">
     <div class="search">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-      <input id="q" type="search" placeholder="Search permissions…" autocomplete="off" />
+      <input id="q" type="search" placeholder="Search permissions…" data-i18n-placeholder="searchPlaceholder" autocomplete="off" />
     </div>
-    <button id="allOn" class="btn">All</button>
-    <button id="allOff" class="btn">None</button>
+    <button id="allOn" class="btn" data-i18n="btnAll">All</button>
+    <button id="allOff" class="btn" data-i18n="btnNone">None</button>
   </div>
   <div id="cats"></div>
 </div>
 <div id="paneHistory" class="tab-pane hidden">
   <div class="hist-toolbar">
-    <span>Execution History</span>
-    <button id="clearHist" class="btn-xs">Clear</button>
+    <span data-i18n="executionHistory">Execution History</span>
+    <button id="clearHist" class="btn-xs" data-i18n="btnClear">Clear</button>
   </div>
   <div id="histList"></div>
 </div>
 <footer>
   <div class="port-row">
     <span class="fdot"></span>
-    <label for="portInput">Port:</label>
+    <label for="portInput" data-i18n="portLabel">Port:</label>
     <input id="portInput" type="number" min="1024" max="65535" value="8765" />
-    <button id="portSave" class="btn-xs" title="Apply Port & Reconnect">Set</button>
-    <button id="portReset" class="btn-xs" title="Reset to default 8765">↺</button>
+    <button id="portSave" class="btn-xs" data-i18n-title="portSaveTitle" title="Apply Port & Reconnect" data-i18n="portSaveBtn">Set</button>
+    <button id="portReset" class="btn-xs" data-i18n-title="portResetTitle" title="Reset to default 8765">↺</button>
   </div>
-  <span class="f-info">Instant sync</span>
+  <select id="langSelect" class="lang-select" data-i18n-title="langSelectTitle" title="Language">
+    <option value="auto" data-i18n="langAuto">🌐 Auto</option>
+    <option value="en">English</option>
+    <option value="tr">Türkçe</option>
+    <option value="es">Español</option>
+    <option value="de">Deutsch</option>
+    <option value="fr">Français</option>
+    <option value="pt_BR">Português</option>
+    <option value="it">Italiano</option>
+    <option value="ru">Русский</option>
+    <option value="ja">日本語</option>
+    <option value="ko">한국어</option>
+  </select>
 </footer>
+<script src="i18n.js"></script>
 <script src="popup.js"></script>
 </body>
 </html>

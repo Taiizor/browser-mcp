@@ -24,7 +24,7 @@ body:
     attributes:
       label: Versions
       description: Extension version, mcp-server version, Bun version, browser + version, OS.
-      placeholder: "ext 0.3.3, server 0.3.3, bun 1.4.2, Chrome 131, Windows 11"
+      placeholder: "ext 0.3.4, server 0.3.4, bun 1.4.2, Chrome 131, Windows 11"
     validations:
       required: true
   - type: textarea

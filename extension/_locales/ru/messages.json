@@ -1,0 +1,182 @@
+{
+  "extName": {
+    "message": "Мост Browser MCP",
+    "description": "Extension name"
+  },
+  "extDescription": {
+    "message": "Полномочный браузерный мост для MCP-серверов: DOM, вкладки, сеть, консоль, CDP.",
+    "description": "Extension description"
+  },
+  "actionTitle": {
+    "message": "Browser MCP",
+    "description": "Popup action title"
+  },
+  "statusConnected": {
+    "message": "Подключено",
+    "description": "Status badge when connected"
+  },
+  "statusNoServer": {
+    "message": "Нет сервера",
+    "description": "Status badge when no server"
+  },
+  "statusError": {
+    "message": "Ошибка",
+    "description": "Status badge when error"
+  },
+  "statusConnecting": {
+    "message": "Подключение…",
+    "description": "Status badge while connecting"
+  },
+  "activeTabTag": {
+    "message": "🌐 Вкладка",
+    "description": "Active tab prefix"
+  },
+  "tabPermissions": {
+    "message": "Разрешения",
+    "description": "Navigation button for permissions"
+  },
+  "tabRecentCommands": {
+    "message": "Последние команды",
+    "description": "Navigation button for recent commands"
+  },
+  "searchPlaceholder": {
+    "message": "Поиск разрешений…",
+    "description": "Search input placeholder"
+  },
+  "btnAll": {
+    "message": "Все",
+    "description": "Enable all button"
+  },
+  "btnNone": {
+    "message": "Ничего",
+    "description": "Disable all button"
+  },
+  "noResults": {
+    "message": "Нет результатов",
+    "description": "Search no results text"
+  },
+  "executionHistory": {
+    "message": "История выполнения",
+    "description": "History section title"
+  },
+  "btnClear": {
+    "message": "Очистить",
+    "description": "Clear history button"
+  },
+  "noCommands": {
+    "message": "Команды еще не выполнялись",
+    "description": "Empty history list message"
+  },
+  "executionFailed": {
+    "message": "Ошибка выполнения",
+    "description": "Fallback error message"
+  },
+  "tabBadgePrefix": {
+    "message": "Вкладка #",
+    "description": "Tab badge prefix"
+  },
+  "portLabel": {
+    "message": "Порт:",
+    "description": "Port input label"
+  },
+  "portSaveBtn": {
+    "message": "Задать",
+    "description": "Apply port button"
+  },
+  "portSaveTitle": {
+    "message": "Применить порт и переподключиться",
+    "description": "Apply port tooltip"
+  },
+  "portResetTitle": {
+    "message": "Сбросить на 8765 по умолчанию",
+    "description": "Reset port tooltip"
+  },
+  "instantSync": {
+    "message": "Мгновенная синхронизация",
+    "description": "Instant sync notice"
+  },
+  "langSelectTitle": {
+    "message": "Язык",
+    "description": "Language selector tooltip"
+  },
+  "langAuto": {
+    "message": "🌐 Авто",
+    "description": "Auto language label"
+  },
+  "cat_tabs": {
+    "message": "Вкладки и окна",
+    "description": "Category: Tabs & Windows"
+  },
+  "cat_read": {
+    "message": "Страница: Чтение",
+    "description": "Category: Page Read"
+  },
+  "cat_interact": {
+    "message": "Страница: Взаимодействие",
+    "description": "Category: Page Interact"
+  },
+  "cat_media": {
+    "message": "Медиа",
+    "description": "Category: Media"
+  },
+  "cat_console": {
+    "message": "Консоль",
+    "description": "Category: Console"
+  },
+  "cat_network": {
+    "message": "Сеть: Наблюдение",
+    "description": "Category: Network Observe"
+  },
+  "cat_mock": {
+    "message": "Сеть: Перехват",
+    "description": "Category: Network Intercept"
+  },
+  "cat_downloads": {
+    "message": "Загрузки",
+    "description": "Category: Downloads"
+  },
+  "cat_bookmarks": {
+    "message": "Закладки",
+    "description": "Category: Bookmarks"
+  },
+  "cat_cookies": {
+    "message": "Файлы cookie",
+    "description": "Category: Cookies"
+  },
+  "cat_storage": {
+    "message": "Хранилище",
+    "description": "Category: Storage"
+  },
+  "cat_sessions": {
+    "message": "Сессии и состояние",
+    "description": "Category: Sessions & State"
+  },
+  "cat_dialogs": {
+    "message": "Диалоги",
+    "description": "Category: Dialogs"
+  },
+  "cat_power": {
+    "message": "Расширенный код (произвольный)",
+    "description": "Category: Power"
+  },
+  "cat_trusted": {
+    "message": "Доверенный ввод (CDP)",
+    "description": "Category: Trusted Input"
+  },
+  "cat_clipboard": {
+    "message": "Буфер обмена",
+    "description": "Category: Clipboard"
+  },
+  "cat_browsing_data": {
+    "message": "Данные браузера",
+    "description": "Category: Browsing Data"
+  },
+  "cat_notifications": {
+    "message": "Уведомления",
+    "description": "Category: Notifications"
+  },
+  "cat_system": {
+    "message": "Система",
+    "description": "Category: System"
+  }
+}

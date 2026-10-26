@@ -1,0 +1,182 @@
+{
+  "extName": {
+    "message": "Browser MCP 브리지",
+    "description": "Extension name"
+  },
+  "extDescription": {
+    "message": "MCP 서버를 위한 최고 권한 브라우저 브리지: DOM, 탭, 네트워크, 콘솔, CDP.",
+    "description": "Extension description"
+  },
+  "actionTitle": {
+    "message": "Browser MCP",
+    "description": "Popup action title"
+  },
+  "statusConnected": {
+    "message": "연결됨",
+    "description": "Status badge when connected"
+  },
+  "statusNoServer": {
+    "message": "서버 없음",
+    "description": "Status badge when no server"
+  },
+  "statusError": {
+    "message": "오류",
+    "description": "Status badge when error"
+  },
+  "statusConnecting": {
+    "message": "연결 중…",
+    "description": "Status badge while connecting"
+  },
+  "activeTabTag": {
+    "message": "🌐 탭",
+    "description": "Active tab prefix"
+  },
+  "tabPermissions": {
+    "message": "권한",
+    "description": "Navigation button for permissions"
+  },
+  "tabRecentCommands": {
+    "message": "최근 명령",
+    "description": "Navigation button for recent commands"
+  },
+  "searchPlaceholder": {
+    "message": "권한 검색…",
+    "description": "Search input placeholder"
+  },
+  "btnAll": {
+    "message": "전체",
+    "description": "Enable all button"
+  },
+  "btnNone": {
+    "message": "해제",
+    "description": "Disable all button"
+  },
+  "noResults": {
+    "message": "검색 결과가 없습니다",
+    "description": "Search no results text"
+  },
+  "executionHistory": {
+    "message": "실행 기록",
+    "description": "History section title"
+  },
+  "btnClear": {
+    "message": "지우기",
+    "description": "Clear history button"
+  },
+  "noCommands": {
+    "message": "아직 실행된 명령이 없습니다",
+    "description": "Empty history list message"
+  },
+  "executionFailed": {
+    "message": "실행 실패",
+    "description": "Fallback error message"
+  },
+  "tabBadgePrefix": {
+    "message": "탭 #",
+    "description": "Tab badge prefix"
+  },
+  "portLabel": {
+    "message": "포트:",
+    "description": "Port input label"
+  },
+  "portSaveBtn": {
+    "message": "설정",
+    "description": "Apply port button"
+  },
+  "portSaveTitle": {
+    "message": "포트 적용 및 재연결",
+    "description": "Apply port tooltip"
+  },
+  "portResetTitle": {
+    "message": "기본값 8765로 초기화",
+    "description": "Reset port tooltip"
+  },
+  "instantSync": {
+    "message": "실시간 동기화",
+    "description": "Instant sync notice"
+  },
+  "langSelectTitle": {
+    "message": "언어",
+    "description": "Language selector tooltip"
+  },
+  "langAuto": {
+    "message": "🌐 자동",
+    "description": "Auto language label"
+  },
+  "cat_tabs": {
+    "message": "탭 및 창",
+    "description": "Category: Tabs & Windows"
+  },
+  "cat_read": {
+    "message": "페이지: 읽기",
+    "description": "Category: Page Read"
+  },
+  "cat_interact": {
+    "message": "페이지: 조작",
+    "description": "Category: Page Interact"
+  },
+  "cat_media": {
+    "message": "미디어",
+    "description": "Category: Media"
+  },
+  "cat_console": {
+    "message": "콘솔",
+    "description": "Category: Console"
+  },
+  "cat_network": {
+    "message": "네트워크: 관찰",
+    "description": "Category: Network Observe"
+  },
+  "cat_mock": {
+    "message": "네트워크: 가로채기(Mock)",
+    "description": "Category: Network Intercept"
+  },
+  "cat_downloads": {
+    "message": "다운로드",
+    "description": "Category: Downloads"
+  },
+  "cat_bookmarks": {
+    "message": "북마크",
+    "description": "Category: Bookmarks"
+  },
+  "cat_cookies": {
+    "message": "쿠키",
+    "description": "Category: Cookies"
+  },
+  "cat_storage": {
+    "message": "저장소",
+    "description": "Category: Storage"
+  },
+  "cat_sessions": {
+    "message": "세션 및 상태",
+    "description": "Category: Sessions & State"
+  },
+  "cat_dialogs": {
+    "message": "대화상자",
+    "description": "Category: Dialogs"
+  },
+  "cat_power": {
+    "message": "고급 코드 (임의 실행)",
+    "description": "Category: Power"
+  },
+  "cat_trusted": {
+    "message": "신뢰할 수 있는 입력 (CDP)",
+    "description": "Category: Trusted Input"
+  },
+  "cat_clipboard": {
+    "message": "클립보드",
+    "description": "Category: Clipboard"
+  },
+  "cat_browsing_data": {
+    "message": "탐색 데이터",
+    "description": "Category: Browsing Data"
+  },
+  "cat_notifications": {
+    "message": "알림",
+    "description": "Category: Notifications"
+  },
+  "cat_system": {
+    "message": "시스템",
+    "description": "Category: System"
+  }
+}

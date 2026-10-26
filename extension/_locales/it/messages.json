@@ -1,0 +1,182 @@
+{
+  "extName": {
+    "message": "Bridge Browser MCP",
+    "description": "Extension name"
+  },
+  "extDescription": {
+    "message": "Bridge browser ad autorità completa per server MCP: DOM, schede, rete, console, CDP.",
+    "description": "Extension description"
+  },
+  "actionTitle": {
+    "message": "Browser MCP",
+    "description": "Popup action title"
+  },
+  "statusConnected": {
+    "message": "Connesso",
+    "description": "Status badge when connected"
+  },
+  "statusNoServer": {
+    "message": "Nessun server",
+    "description": "Status badge when no server"
+  },
+  "statusError": {
+    "message": "Errore",
+    "description": "Status badge when error"
+  },
+  "statusConnecting": {
+    "message": "Connessione in corso…",
+    "description": "Status badge while connecting"
+  },
+  "activeTabTag": {
+    "message": "🌐 Scheda",
+    "description": "Active tab prefix"
+  },
+  "tabPermissions": {
+    "message": "Autorizzazioni",
+    "description": "Navigation button for permissions"
+  },
+  "tabRecentCommands": {
+    "message": "Comandi recenti",
+    "description": "Navigation button for recent commands"
+  },
+  "searchPlaceholder": {
+    "message": "Cerca autorizzazioni…",
+    "description": "Search input placeholder"
+  },
+  "btnAll": {
+    "message": "Tutto",
+    "description": "Enable all button"
+  },
+  "btnNone": {
+    "message": "Nessuno",
+    "description": "Disable all button"
+  },
+  "noResults": {
+    "message": "Nessun risultato",
+    "description": "Search no results text"
+  },
+  "executionHistory": {
+    "message": "Cronologia esecuzioni",
+    "description": "History section title"
+  },
+  "btnClear": {
+    "message": "Cancella",
+    "description": "Clear history button"
+  },
+  "noCommands": {
+    "message": "Nessun comando ancora eseguito",
+    "description": "Empty history list message"
+  },
+  "executionFailed": {
+    "message": "Esecuzione non riuscita",
+    "description": "Fallback error message"
+  },
+  "tabBadgePrefix": {
+    "message": "Scheda #",
+    "description": "Tab badge prefix"
+  },
+  "portLabel": {
+    "message": "Porta:",
+    "description": "Port input label"
+  },
+  "portSaveBtn": {
+    "message": "Imposta",
+    "description": "Apply port button"
+  },
+  "portSaveTitle": {
+    "message": "Applica porta e riconnetti",
+    "description": "Apply port tooltip"
+  },
+  "portResetTitle": {
+    "message": "Reimposta al valore predefinito 8765",
+    "description": "Reset port tooltip"
+  },
+  "instantSync": {
+    "message": "Sincronizzazione istantanea",
+    "description": "Instant sync notice"
+  },
+  "langSelectTitle": {
+    "message": "Lingua",
+    "description": "Language selector tooltip"
+  },
+  "langAuto": {
+    "message": "🌐 Automatico",
+    "description": "Auto language label"
+  },
+  "cat_tabs": {
+    "message": "Schede e finestre",
+    "description": "Category: Tabs & Windows"
+  },
+  "cat_read": {
+    "message": "Pagina: Lettura",
+    "description": "Category: Page Read"
+  },
+  "cat_interact": {
+    "message": "Pagina: Interazione",
+    "description": "Category: Page Interact"
+  },
+  "cat_media": {
+    "message": "Elementi multimediali",
+    "description": "Category: Media"
+  },
+  "cat_console": {
+    "message": "Console",
+    "description": "Category: Console"
+  },
+  "cat_network": {
+    "message": "Rete: Osservazione",
+    "description": "Category: Network Observe"
+  },
+  "cat_mock": {
+    "message": "Rete: Intercettazione",
+    "description": "Category: Network Intercept"
+  },
+  "cat_downloads": {
+    "message": "Download",
+    "description": "Category: Downloads"
+  },
+  "cat_bookmarks": {
+    "message": "Segnalibri",
+    "description": "Category: Bookmarks"
+  },
+  "cat_cookies": {
+    "message": "Cookie",
+    "description": "Category: Cookies"
+  },
+  "cat_storage": {
+    "message": "Archiviazione",
+    "description": "Category: Storage"
+  },
+  "cat_sessions": {
+    "message": "Sessioni e stato",
+    "description": "Category: Sessions & State"
+  },
+  "cat_dialogs": {
+    "message": "Finestre di dialogo",
+    "description": "Category: Dialogs"
+  },
+  "cat_power": {
+    "message": "Codice avanzato (arbitrario)",
+    "description": "Category: Power"
+  },
+  "cat_trusted": {
+    "message": "Input attendibile (CDP)",
+    "description": "Category: Trusted Input"
+  },
+  "cat_clipboard": {
+    "message": "Appunti",
+    "description": "Category: Clipboard"
+  },
+  "cat_browsing_data": {
+    "message": "Dati di navigazione",
+    "description": "Category: Browsing Data"
+  },
+  "cat_notifications": {
+    "message": "Notifiche",
+    "description": "Category: Notifications"
+  },
+  "cat_system": {
+    "message": "Sistema",
+    "description": "Category: System"
+  }
+}

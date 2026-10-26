@@ -70,7 +70,7 @@ let bridge: IBridge;
 
 const server = new McpServer({
   name: "browser-mcp",
-  version: "0.3.3",
+  version: "0.3.4",
 });
 
 // ---------- helpers ----------
@@ -456,7 +456,7 @@ server.tool(
       );
       return textResult(r);
     } catch (e) {
-      // Old extensions (<0.3.3) evaluated via content-script new Function,
+      // Old extensions (<0.3.4) evaluated via content-script new Function,
       // blocked by the extension CSP (no 'unsafe-eval'). Fallback keeps them
       // working: Runtime.evaluate over the debugger (unaffected by CSP).
       if (!/Content Security Policy|unsafe-eval|Evaluating a string|handled via CDP/i.test(String((e as Error)?.message ?? e))) {

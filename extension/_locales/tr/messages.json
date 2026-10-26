@@ -1,0 +1,182 @@
+{
+  "extName": {
+    "message": "Browser MCP Köprüsü",
+    "description": "Extension name"
+  },
+  "extDescription": {
+    "message": "MCP sunucuları için tam yetkili tarayıcı köprüsü: DOM, sekmeler, ağ, konsol, CDP.",
+    "description": "Extension description"
+  },
+  "actionTitle": {
+    "message": "Browser MCP",
+    "description": "Popup action title"
+  },
+  "statusConnected": {
+    "message": "Bağlandı",
+    "description": "Status badge when connected"
+  },
+  "statusNoServer": {
+    "message": "Sunucu yok",
+    "description": "Status badge when no server"
+  },
+  "statusError": {
+    "message": "Hata",
+    "description": "Status badge when error"
+  },
+  "statusConnecting": {
+    "message": "Bağlanıyor…",
+    "description": "Status badge while connecting"
+  },
+  "activeTabTag": {
+    "message": "🌐 Sekme",
+    "description": "Active tab prefix"
+  },
+  "tabPermissions": {
+    "message": "İzinler",
+    "description": "Navigation button for permissions"
+  },
+  "tabRecentCommands": {
+    "message": "Son Komutlar",
+    "description": "Navigation button for recent commands"
+  },
+  "searchPlaceholder": {
+    "message": "İzinlerde ara…",
+    "description": "Search input placeholder"
+  },
+  "btnAll": {
+    "message": "Tümü",
+    "description": "Enable all button"
+  },
+  "btnNone": {
+    "message": "Hiçbiri",
+    "description": "Disable all button"
+  },
+  "noResults": {
+    "message": "Sonuç bulunamadı",
+    "description": "Search no results text"
+  },
+  "executionHistory": {
+    "message": "Çalıştırma Geçmişi",
+    "description": "History section title"
+  },
+  "btnClear": {
+    "message": "Temizle",
+    "description": "Clear history button"
+  },
+  "noCommands": {
+    "message": "Henüz komut çalıştırılmadı",
+    "description": "Empty history list message"
+  },
+  "executionFailed": {
+    "message": "Çalıştırma başarısız",
+    "description": "Fallback error message"
+  },
+  "tabBadgePrefix": {
+    "message": "Sekme #",
+    "description": "Tab badge prefix"
+  },
+  "portLabel": {
+    "message": "Port:",
+    "description": "Port input label"
+  },
+  "portSaveBtn": {
+    "message": "Ayarla",
+    "description": "Apply port button"
+  },
+  "portSaveTitle": {
+    "message": "Portu Uygula ve Yeniden Bağlan",
+    "description": "Apply port tooltip"
+  },
+  "portResetTitle": {
+    "message": "Varsayılan 8765'e Sıfırla",
+    "description": "Reset port tooltip"
+  },
+  "instantSync": {
+    "message": "Anlık senkronizasyon",
+    "description": "Instant sync notice"
+  },
+  "langSelectTitle": {
+    "message": "Dil seçimi",
+    "description": "Language selector tooltip"
+  },
+  "langAuto": {
+    "message": "🌐 Otomatik",
+    "description": "Auto language label"
+  },
+  "cat_tabs": {
+    "message": "Sekmeler ve Pencereler",
+    "description": "Category: Tabs & Windows"
+  },
+  "cat_read": {
+    "message": "Sayfa: Okuma",
+    "description": "Category: Page Read"
+  },
+  "cat_interact": {
+    "message": "Sayfa: Etkileşim",
+    "description": "Category: Page Interact"
+  },
+  "cat_media": {
+    "message": "Medya",
+    "description": "Category: Media"
+  },
+  "cat_console": {
+    "message": "Konsol",
+    "description": "Category: Console"
+  },
+  "cat_network": {
+    "message": "Ağ: İzleme",
+    "description": "Category: Network Observe"
+  },
+  "cat_mock": {
+    "message": "Ağ: Müdahale (Mock)",
+    "description": "Category: Network Intercept"
+  },
+  "cat_downloads": {
+    "message": "İndirmeler",
+    "description": "Category: Downloads"
+  },
+  "cat_bookmarks": {
+    "message": "Yer İşaretleri",
+    "description": "Category: Bookmarks"
+  },
+  "cat_cookies": {
+    "message": "Çerezler",
+    "description": "Category: Cookies"
+  },
+  "cat_storage": {
+    "message": "Depolama",
+    "description": "Category: Storage"
+  },
+  "cat_sessions": {
+    "message": "Oturumlar ve Durum",
+    "description": "Category: Sessions & State"
+  },
+  "cat_dialogs": {
+    "message": "Diyaloglar",
+    "description": "Category: Dialogs"
+  },
+  "cat_power": {
+    "message": "Gelişmiş Kod (Arbitrary Code)",
+    "description": "Category: Power"
+  },
+  "cat_trusted": {
+    "message": "Güvenilir Giriş (CDP)",
+    "description": "Category: Trusted Input"
+  },
+  "cat_clipboard": {
+    "message": "Pano",
+    "description": "Category: Clipboard"
+  },
+  "cat_browsing_data": {
+    "message": "Tarama Verileri",
+    "description": "Category: Browsing Data"
+  },
+  "cat_notifications": {
+    "message": "Bildirimler",
+    "description": "Category: Notifications"
+  },
+  "cat_system": {
+    "message": "Sistem",
+    "description": "Category: System"
+  }
+}

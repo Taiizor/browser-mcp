@@ -61,10 +61,12 @@ async function refreshStatus() {
     } else if (activeBar) {
       activeBar.style.display = "none";
     }
-    if (r && r.bridgeConnected) set(true, "Connected");
-    else set(false, "No server");
+    const t = (k, def) => (typeof I18N !== "undefined" ? I18N.t(k, def) : def);
+    if (r && r.bridgeConnected) set(true, t("statusConnected", "Connected"));
+    else set(false, t("statusNoServer", "No server"));
   } catch {
-    set(false, "Error");
+    const t = (k, def) => (typeof I18N !== "undefined" ? I18N.t(k, def) : def);
+    set(false, t("statusError", "Error"));
   }
 }
 
@@ -76,13 +78,15 @@ async function push() {
 }
 
 function render(filter = "") {
+  const t = (k, def) => (typeof I18N !== "undefined" ? I18N.t(k, def) : def);
   const box = $("#cats");
   const prevScroll = box.scrollTop;
   box.innerHTML = "";
   const q = filter.trim().toLowerCase();
   let shown = 0;
   for (const c of CATS) {
-    const acts = c.actions.filter((a) => !q || a.includes(q) || c.title.toLowerCase().includes(q));
+    const catTitle = t("cat_" + c.id, c.title);
+    const acts = c.actions.filter((a) => !q || a.includes(q) || catTitle.toLowerCase().includes(q) || c.title.toLowerCase().includes(q));
     if (!acts.length) continue;
     shown++;
     const on = acts.filter((a) => !disabled.has(a)).length;
@@ -92,7 +96,7 @@ function render(filter = "") {
     head.className = "cat-h";
     const nm = document.createElement("span");
     nm.className = "nm";
-    nm.textContent = c.title;
+    nm.textContent = catTitle;
     const ct = document.createElement("span");
     ct.className = "ct";
     ct.textContent = q ? `${on}/${acts.length}` : `${on}/${c.actions.length}`;
@@ -140,7 +144,7 @@ function render(filter = "") {
   if (!shown) {
     const d = document.createElement("div");
     d.className = "empty";
-    d.textContent = "No results";
+    d.textContent = t("noResults", "No results");
     box.appendChild(d);
   }
   box.scrollTop = prevScroll;
@@ -171,6 +175,7 @@ function escapeHtml(s) {
 }
 
 async function refreshHistory() {
+  const t = (k, def) => (typeof I18N !== "undefined" ? I18N.t(k, def) : def);
   try {
     const r = await bg({ type: "mcp-history-get" });
     const list = r?.history || [];
@@ -179,22 +184,22 @@ async function refreshHistory() {
     const box = $("#histList");
     if (!box) return;
     if (!list.length) {
-      box.innerHTML = `<div class="hist-empty">No commands executed yet</div>`;
+      box.innerHTML = `<div class="hist-empty">${t("noCommands", "No commands executed yet")}</div>`;
       return;
     }
     box.innerHTML = list
       .map((item) => {
-        const t = new Date(item.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-        const tabBadge = item.tabId ? `<span class="audit-badge">Tab #${item.tabId}</span>` : "";
+        const timeStr = new Date(item.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+        const tabBadge = item.tabId ? `<span class="audit-badge">${t("tabBadgePrefix", "Tab #")}${item.tabId}</span>` : "";
         const durBadge = `<span class="audit-badge">${item.durationMs}ms</span>`;
-        const errMsg = !item.ok ? `<div class="audit-err-msg">${escapeHtml(item.error || "Execution failed")}</div>` : "";
+        const errMsg = !item.ok ? `<div class="audit-err-msg">${escapeHtml(item.error || t("executionFailed", "Execution failed"))}</div>` : "";
         return `<div class="audit-card ${item.ok ? "" : "err"}">
           <div class="audit-top">
             <div class="audit-name">
               <span class="audit-dot"></span>
               <code>${escapeHtml(item.action)}</code>
             </div>
-            <span class="audit-time">${t}</span>
+            <span class="audit-time">${timeStr}</span>
           </div>
           <div class="audit-meta-row">
             ${durBadge}
@@ -221,6 +226,9 @@ function switchTab(name) {
 }
 
 (async () => {
+  if (typeof I18N !== "undefined") {
+    await I18N.init();
+  }
   await refreshStatus();
   updateVer(currentPort);
   await refreshHistory();
@@ -274,6 +282,22 @@ function switchTab(name) {
     portReset.addEventListener("click", async () => {
       if (portInp) portInp.value = "8765";
       await applyPort();
+    });
+  }
+
+  const langSel = $("#langSelect");
+  if (langSel && typeof I18N !== "undefined") {
+    langSel.value = I18N.getPreference();
+    langSel.addEventListener("change", async (e) => {
+      await I18N.setLocale(e.target.value);
+      render($("#q").value);
+      await refreshStatus();
+      await refreshHistory();
+    });
+    I18N.onChange(() => {
+      render($("#q").value);
+      refreshStatus();
+      refreshHistory();
     });
   }
 
