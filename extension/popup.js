@@ -1,6 +1,9 @@
 // Popup: status + category-based permission switches.
 // Single source is PERM_CATS in background; state syncs via chrome.storage.
 
+// Disable default right-click context menu (prevents "Inspect" in popup)
+document.addEventListener("contextmenu", (e) => e.preventDefault());
+
 const $ = (s) => document.querySelector(s);
 let CATS = [];
 let disabled = new Set();
