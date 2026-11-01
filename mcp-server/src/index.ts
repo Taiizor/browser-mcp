@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+import { spawn } from "node:child_process";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { EmptyResultSchema, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
@@ -437,6 +440,273 @@ server.tool("page_pdf", "Render the tab to PDF (base64). Slower; for visuals pre
   const r = await bridge.send("page_pdf", {}, tabId, 60000);
   return textResult(r);
 });
+
+// ---------- tab audio recording ----------
+function resolveFfmpeg(custom?: string): string | null {
+  if (custom && fs.existsSync(custom)) return custom;
+  if (process.env.FFMPEG_PATH && fs.existsSync(process.env.FFMPEG_PATH)) {
+    return process.env.FFMPEG_PATH;
+  }
+
+  // Search system PATH
+  const pathEnv = process.env.PATH || "";
+  const sep = process.platform === "win32" ? ";" : ":";
+  const names = process.platform === "win32" ? ["ffmpeg.exe", "ffmpeg.cmd", "ffmpeg"] : ["ffmpeg"];
+
+  for (const dir of pathEnv.split(sep)) {
+    const trimmed = dir.trim();
+    if (!trimmed) continue;
+    for (const name of names) {
+      try {
+        const full = path.join(trimmed, name);
+        if (fs.existsSync(full)) return full;
+      } catch {}
+    }
+  }
+
+  // Standard OS package manager install paths
+  if (process.platform === "win32") {
+    const candidates = [
+      process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, "Microsoft", "WinGet", "Links", "ffmpeg.exe"),
+      process.env.USERPROFILE && path.join(process.env.USERPROFILE, "scoop", "shims", "ffmpeg.exe"),
+      process.env.ProgramData && path.join(process.env.ProgramData, "chocolatey", "bin", "ffmpeg.exe"),
+      "C:\\ffmpeg\\bin\\ffmpeg.exe",
+    ].filter(Boolean) as string[];
+
+    for (const c of candidates) {
+      try {
+        if (fs.existsSync(c)) return c;
+      } catch {}
+    }
+  } else {
+    const candidates = [
+      "/usr/bin/ffmpeg",
+      "/usr/local/bin/ffmpeg",
+      "/opt/homebrew/bin/ffmpeg",
+      "/usr/pkg/bin/ffmpeg",
+    ];
+    for (const c of candidates) {
+      try {
+        if (fs.existsSync(c)) return c;
+      } catch {}
+    }
+  }
+
+  return null;
+}
+
+async function convertAudioFile(
+  inputBuffer: Buffer,
+  outputPath: string,
+  customFfmpeg?: string
+): Promise<{ success: boolean; error?: string }> {
+  const ffmpegBin = resolveFfmpeg(customFfmpeg);
+  if (!ffmpegBin) {
+    return {
+      success: false,
+      error:
+        "ffmpeg binary was not found in PATH or FFMPEG_PATH. Install FFmpeg (e.g. winget install Gyan.FFmpeg / brew install ffmpeg) or set FFMPEG_PATH to enable audio format conversion.",
+    };
+  }
+
+  const tempWebm = outputPath + ".tmp.webm";
+  fs.writeFileSync(tempWebm, inputBuffer);
+
+  return new Promise((resolve) => {
+    const args = ["-y", "-i", tempWebm];
+    if (outputPath.toLowerCase().endsWith(".mp3")) {
+      args.push("-c:a", "libmp3lame", "-q:a", "2");
+    }
+    args.push(outputPath);
+
+    const proc = spawn(ffmpegBin, args);
+    proc.on("error", (err) => {
+      try {
+        fs.unlinkSync(tempWebm);
+      } catch {}
+      resolve({ success: false, error: err.message });
+    });
+    proc.on("close", (code) => {
+      try {
+        fs.unlinkSync(tempWebm);
+      } catch {}
+      if (code === 0) {
+        resolve({ success: true });
+      } else {
+        resolve({ success: false, error: `ffmpeg exited with code ${code}` });
+      }
+    });
+  });
+}
+
+server.tool(
+  "tab_audio_record_start",
+  "Start capturing/recording audio from a browser tab (e.g. while Spotify, YouTube, or web audio plays). Does not block; use tab_audio_record_stop to stop and collect the audio.",
+  {
+    tabId: TabId,
+    passthrough: z.boolean().optional().describe("Whether to keep playing audio through speakers while recording (default true)"),
+  },
+  async ({ tabId, passthrough }) => {
+    const r = await bridge.send("tab_audio_record_start", { passthrough: passthrough !== false }, tabId);
+    return textResult(r);
+  }
+);
+
+server.tool(
+  "tab_audio_record_stop",
+  "Stop an ongoing tab audio recording and return the audio data or save it to a file on disk (supports .webm, .mp3, .wav if ffmpeg is available).",
+  {
+    tabId: TabId,
+    savePath: z.string().optional().describe("Absolute file path to save the audio recording (e.g. C:/Music/track.mp3 or .webm)"),
+    ffmpegPath: z.string().optional().describe("Explicit path to ffmpeg executable (optional)"),
+  },
+  async ({ tabId, savePath, ffmpegPath }) => {
+    const res = (await bridge.send("tab_audio_record_stop", {}, tabId, 60000)) as {
+      ok: boolean;
+      tabId: number;
+      base64?: string;
+      mimeType?: string;
+      durationMs?: number;
+      sizeBytes?: number;
+    };
+
+    if (!res.base64) {
+      return textResult(res);
+    }
+
+    const buffer = Buffer.from(res.base64, "base64");
+    if (savePath) {
+      const resolved = path.resolve(savePath);
+      const dir = path.dirname(resolved);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+      const ext = path.extname(resolved).toLowerCase();
+      if (ext && ext !== ".webm") {
+        const conv = await convertAudioFile(buffer, resolved, ffmpegPath);
+        if (conv.success) {
+          return textResult({
+            ok: true,
+            tabId: res.tabId,
+            durationMs: res.durationMs,
+            sizeBytes: fs.statSync(resolved).size,
+            savedTo: resolved,
+            format: ext.slice(1),
+          });
+        }
+        const fallback = resolved + ".webm";
+        fs.writeFileSync(fallback, buffer);
+        return textResult({
+          ok: true,
+          tabId: res.tabId,
+          durationMs: res.durationMs,
+          sizeBytes: buffer.length,
+          savedTo: fallback,
+          format: "webm",
+          conversionWarning: `Failed to convert to ${ext}: ${conv.error}. Saved raw webm instead.`,
+        });
+      }
+
+      fs.writeFileSync(resolved, buffer);
+      return textResult({
+        ok: true,
+        tabId: res.tabId,
+        durationMs: res.durationMs,
+        sizeBytes: buffer.length,
+        savedTo: resolved,
+        format: "webm",
+      });
+    }
+
+    return textResult({
+      ok: true,
+      tabId: res.tabId,
+      durationMs: res.durationMs,
+      sizeBytes: res.sizeBytes,
+      mimeType: res.mimeType,
+      dataBase64: res.base64,
+    });
+  }
+);
+
+server.tool(
+  "tab_audio_capture",
+  "Record tab audio for a specified duration in seconds (convenience tool for songs, clips, etc.). Starts recording, waits for the duration, stops, and saves or returns the audio.",
+  {
+    durationSeconds: z.number().positive().max(3600).describe("Recording duration in seconds (e.g. 30, 252)"),
+    tabId: TabId,
+    savePath: z.string().optional().describe("Absolute file path to save the audio recording (e.g. C:/Music/track.mp3 or .webm)"),
+    passthrough: z.boolean().optional().describe("Whether to keep playing audio through speakers while recording (default true)"),
+    ffmpegPath: z.string().optional().describe("Explicit path to ffmpeg executable (optional)"),
+  },
+  async ({ durationSeconds, tabId, savePath, passthrough, ffmpegPath }) => {
+    await bridge.send("tab_audio_record_start", { passthrough: passthrough !== false }, tabId);
+    await new Promise((r) => setTimeout(r, Math.round(durationSeconds * 1000)));
+    const res = (await bridge.send("tab_audio_record_stop", {}, tabId, 60000)) as {
+      ok: boolean;
+      tabId: number;
+      base64?: string;
+      mimeType?: string;
+      durationMs?: number;
+      sizeBytes?: number;
+    };
+
+    if (!res.base64) {
+      return textResult(res);
+    }
+
+    const buffer = Buffer.from(res.base64, "base64");
+    if (savePath) {
+      const resolved = path.resolve(savePath);
+      const dir = path.dirname(resolved);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+      const ext = path.extname(resolved).toLowerCase();
+      if (ext && ext !== ".webm") {
+        const conv = await convertAudioFile(buffer, resolved, ffmpegPath);
+        if (conv.success) {
+          return textResult({
+            ok: true,
+            tabId: res.tabId,
+            durationMs: res.durationMs,
+            sizeBytes: fs.statSync(resolved).size,
+            savedTo: resolved,
+            format: ext.slice(1),
+          });
+        }
+        const fallback = resolved + ".webm";
+        fs.writeFileSync(fallback, buffer);
+        return textResult({
+          ok: true,
+          tabId: res.tabId,
+          durationMs: res.durationMs,
+          sizeBytes: buffer.length,
+          savedTo: fallback,
+          format: "webm",
+          conversionWarning: `Failed to convert to ${ext}: ${conv.error}. Saved raw webm instead.`,
+        });
+      }
+
+      fs.writeFileSync(resolved, buffer);
+      return textResult({
+        ok: true,
+        tabId: res.tabId,
+        durationMs: res.durationMs,
+        sizeBytes: buffer.length,
+        savedTo: resolved,
+        format: "webm",
+      });
+    }
+
+    return textResult({
+      ok: true,
+      tabId: res.tabId,
+      durationMs: res.durationMs,
+      sizeBytes: res.sizeBytes,
+      mimeType: res.mimeType,
+      dataBase64: res.base64,
+    });
+  }
+);
 
 // ---------- js / console ----------
 server.tool(

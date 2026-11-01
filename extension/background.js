@@ -342,13 +342,21 @@ async function activeTabId() {
   return t.id;
 }
 
-async function ensureOffscreen() {
-  if (chrome.offscreen && chrome.offscreen.hasDocument && (await chrome.offscreen.hasDocument())) return;
+async function ensureOffscreen(requireUserMedia = false) {
+  if (chrome.offscreen && chrome.offscreen.hasDocument) {
+    const hasDoc = await chrome.offscreen.hasDocument();
+    if (hasDoc && !requireUserMedia) return;
+    if (hasDoc && requireUserMedia) {
+      try {
+        await chrome.offscreen.closeDocument();
+      } catch {}
+    }
+  }
   try {
     await chrome.offscreen.createDocument({
       url: "offscreen.html",
-      reasons: ["CLIPBOARD"],
-      justification: "Clipboard read and write for MCP browser bridge",
+      reasons: ["CLIPBOARD", "USER_MEDIA"],
+      justification: "Clipboard read/write and tab audio capture for MCP browser bridge",
     });
   } catch (e) {
     if (!String(e).includes("only a single offscreen")) throw e;
@@ -633,7 +641,7 @@ const PERM_CATS = [
   { id: "tabs", title: "Tabs & Windows", actions: ["tabs_list", "tab_create", "tab_duplicate", "tab_close", "tab_activate", "tab_navigate", "tab_reload", "tab_back", "tab_forward", "tab_pin", "tab_mute", "window_list", "window_create", "window_focus", "browser_close", "frame_list", "frame_focus", "frame_clear", "tab_group_create", "tab_group_list", "tab_group_update", "tab_group_ungroup"] },
   { id: "read", title: "Page: Read", actions: ["page_snapshot", "page_html", "page_text", "dom_query", "page_find", "page_wait", "page_axtree"] },
   { id: "interact", title: "Page: Interact", actions: ["dom_click", "dom_type", "dom_fill", "dom_select", "dom_check", "dom_hover", "dom_focus", "dom_scroll", "dom_drag", "dom_upload", "keyboard_press"] },
-  { id: "media", title: "Media", actions: ["page_screenshot", "page_pdf"] },
+  { id: "media", title: "Media", actions: ["page_screenshot", "page_pdf", "tab_audio_record_start", "tab_audio_record_stop"] },
   { id: "console", title: "Console", actions: ["console_get", "console_clear"] },
   { id: "network", title: "Network: Observe", actions: ["network_requests", "network_clear", "network_response_body", "network_bodies", "network_throttle", "network_set_headers", "har_export"] },
   { id: "mock", title: "Network: Intercept", actions: ["network_mock_start", "network_mock_stop", "network_mock_route", "network_mock_list", "network_mock_remove", "network_mock_clear"] },
@@ -1035,6 +1043,47 @@ async function handleCommand(action, payload, tabId) {
         return await cdpSend(dbg, "Page.printToPDF", { printBackground: true });
       });
       return { tabId: id, dataBase64: pdf.data, note: "PDF base64 (write the data field to a file)" };
+    }
+
+    case "tab_audio_record_start": {
+      const id = tabId ?? (await activeTabId());
+      await ensureOffscreen(true);
+      let streamId;
+      try {
+        streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: id });
+      } catch (err) {
+        throw new Error(`Failed to get media stream for tab ${id}: ${err.message || err}`);
+      }
+      const res = await chrome.runtime.sendMessage({
+        type: "mcp-offscreen-audio-start",
+        streamId,
+        tabId: id,
+        passthrough: payload.passthrough !== false,
+      });
+      if (!res || !res.ok) {
+        throw new Error(res?.error || "Failed to start tab audio recording in offscreen document");
+      }
+      return { ok: true, tabId: id, recording: true, startedAt: res.startedAt, mimeType: res.mimeType };
+    }
+
+    case "tab_audio_record_stop": {
+      const id = tabId ?? (await activeTabId());
+      await ensureOffscreen();
+      const res = await chrome.runtime.sendMessage({
+        type: "mcp-offscreen-audio-stop",
+        tabId: id,
+      });
+      if (!res || !res.ok) {
+        throw new Error(res?.error || "Failed to stop tab audio recording in offscreen document");
+      }
+      return {
+        ok: true,
+        tabId: id,
+        base64: res.base64,
+        mimeType: res.mimeType,
+        durationMs: res.durationMs,
+        sizeBytes: res.sizeBytes,
+      };
     }
 
     // ----- console -----
