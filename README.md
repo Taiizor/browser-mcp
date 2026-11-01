@@ -8,7 +8,7 @@
 
 MCP server (`stdio`) + Chrome/Edge extension (`WebSocket`) with access to everything
 in the browser: clicking, typing, search, tab & window management, tab groups, network intercept/throttle,
-console, cookies, storage, offscreen clipboard, desktop notifications, session restore, screenshots, PDF, and CDP.
+console, cookies, storage, offscreen clipboard & tab audio recording, desktop notifications, session restore, screenshots, PDF, and CDP.
 
 ## Architecture
 
@@ -21,7 +21,7 @@ mcp-server/ (Bun, WS bridge listening on 127.0.0.1:<port>)
   ▼
 extension/ (Chrome MV3, WS client with alarms heartbeat & Origin security)
   ├── background.js → tabs, tab groups, cookies, history, webRequest, debugger (CDP), browsing data, notifications, alarms
-  ├── offscreen.js  → clipboard read/write bridge
+  ├── offscreen.js  → clipboard read/write bridge & tab audio capture (MediaRecorder / AudioContext)
   └── content.js    → DOM snapshot, click, type, reactive page_wait, JS evaluate, console hook
 ```
 
@@ -225,7 +225,7 @@ The toolbar icon opens a zinc-dark panel:
 
 ---
 
-## Tools (111)
+## Tools (114)
 
 | Group | Tools |
 |---|---|
@@ -233,7 +233,7 @@ The toolbar icon opens a zinc-dark panel:
 | **Tabs & Windows** | `tab_list`, `tab_create`, `tab_duplicate`, `tab_close`, `tab_activate`, `tab_navigate`, `tab_reload`, `tab_back`, `tab_forward`, `tab_pin`, `tab_mute`, `window_list`, `window_create`, `window_focus` |
 | **Tab Groups** | `tab_group_create`, `tab_group_list`, `tab_group_update`, `tab_group_ungroup` |
 | **DOM Interaction** | `page_snapshot`, `page_html`, `page_text`, `dom_query`, `dom_click`, `dom_type`, `dom_fill`, `dom_select`, `dom_check`, `dom_hover`, `dom_focus`, `dom_scroll`, `dom_drag`, `keyboard_press`, `page_find`, `page_wait` |
-| **Media & Screenshots** | `page_screenshot` (viewport, `fullPage` with layout metrics, or `selector` element shot), `page_pdf` |
+| **Media & Audio** | `page_screenshot` (viewport, `fullPage` with layout metrics, or `selector` element shot), `page_pdf`, `tab_audio_record_start`, `tab_audio_record_stop`, `tab_audio_capture` (recording with auto FFmpeg `.mp3`/`.wav` conversion) |
 | **Console & JS** | `js_evaluate`, `console_get`, `console_clear` |
 | **Network Observe & Intercept** | `network_requests`, `network_clear`, `network_response_body`, `network_bodies`, `network_throttle`, `network_set_headers`, `har_export` |
 | **Network Mocking** | `network_mock_start`, `network_mock_route`, `network_mock_list`, `network_mock_remove`, `network_mock_clear`, `network_mock_stop` |

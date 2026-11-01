@@ -57,7 +57,7 @@ function New-StoreShot($PopupFile, $Title, $Lines, $OutFile) {
           $g.DrawImage($icon, $x, 640, 64, 64)
         } finally { $icon.Dispose() }
         $bullet = [char]0x2022
-        $g.DrawString(('Local-first  ' + $bullet + '  111 MCP tools  ' + $bullet + '  MIT'), $fSmall, $gray, ($x + 80), 658)
+        $g.DrawString(('Local-first  ' + $bullet + '  114 MCP tools  ' + $bullet + '  MIT'), $fSmall, $gray, ($x + 80), 658)
       } finally {
         $fTitle.Dispose(); $fSub.Dispose(); $fBody.Dispose(); $fSmall.Dispose()
       }
@@ -113,7 +113,7 @@ try {
     try {
       $sg.DrawString('Browser MCP', $sfTitle, $swhite, 420, 190)
       $sg.DrawString('Full-authority browser bridge for AI assistants', $sfSub, $sgray, 424, 310)
-      $sg.DrawString('111 MCP tools  ' + [char]0x2022 + '  Chromium MV3  ' + [char]0x2022 + '  MIT', $sfSmall, $saccent, 424, 380)
+      $sg.DrawString('114 MCP tools  ' + [char]0x2022 + '  Chromium MV3  ' + [char]0x2022 + '  MIT', $sfSmall, $saccent, 424, 380)
     } finally {
       $sfTitle.Dispose(); $sfSub.Dispose(); $sfSmall.Dispose()
     }
