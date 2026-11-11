@@ -27,6 +27,18 @@
     "message": "연결 중…",
     "description": "Status badge while connecting"
   },
+  "statusRejected": {
+    "message": "거부됨",
+    "description": "Status badge when the MCP server refused the connection"
+  },
+  "statusPairedTitle": {
+    "message": "MCP 서버와 페어링됨",
+    "description": "Status badge tooltip when the server completed the handshake"
+  },
+  "statusHandshakeTitle": {
+    "message": "연결됨, MCP 서버 핸드셰이크 대기 중",
+    "description": "Status badge tooltip while connected but the server handshake is pending"
+  },
   "activeTabTag": {
     "message": "🌐 탭",
     "description": "Active tab prefix"
@@ -54,6 +66,10 @@
   "noResults": {
     "message": "검색 결과가 없습니다",
     "description": "Search no results text"
+  },
+  "permsAgentNote": {
+    "message": "AI 에이전트는 권한을 끌 수만 있습니다. 다시 켜는 것은 여기에서만 가능합니다.",
+    "description": "Hint under the permission search: the agent can only disable permissions"
   },
   "executionHistory": {
     "message": "실행 기록",
@@ -102,6 +118,38 @@
   "langAuto": {
     "message": "🌐 자동",
     "description": "Auto language label"
+  },
+  "trustRejectedTitle": {
+    "message": "MCP 서버가 이 확장 프로그램을 거부했습니다",
+    "description": "Notice title when the MCP server rejected this extension id (close code 4003)"
+  },
+  "trustRejectedBody": {
+    "message": "이 확장 프로그램 ID가 서버의 신뢰 목록에 없습니다. 다음 중 하나를 수행한 후 MCP 서버를 다시 시작하세요:",
+    "description": "Notice text explaining how to make the MCP server trust this extension"
+  },
+  "trustOptEnv": {
+    "message": "MCP 서버에 다음 환경 변수를 설정하세요:",
+    "description": "Notice option: environment variable to trust this extension id"
+  },
+  "trustOptReset": {
+    "message": "또는 이 파일을 삭제하면 다음에 연결되는 확장 프로그램과 다시 페어링됩니다:",
+    "description": "Notice option: delete the trusted-extensions file to pair again"
+  },
+  "extensionIdLabel": {
+    "message": "확장 프로그램 ID",
+    "description": "Label for this extension's id"
+  },
+  "btnCopy": {
+    "message": "복사",
+    "description": "Copy button"
+  },
+  "copied": {
+    "message": "복사됨",
+    "description": "Copy button feedback after copying"
+  },
+  "serverClosedTitle": {
+    "message": "MCP 서버가 연결을 종료했습니다",
+    "description": "Notice title when the MCP server closed the connection with another code"
   },
   "cat_tabs": {
     "message": "탭 및 창",

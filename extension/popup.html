@@ -154,6 +154,21 @@
   .audit-meta-row { display: flex; align-items: center; gap: 6px; font-size: 10px; color: var(--muted-fg); }
   .audit-badge { background: #1c1c21; border: 1px solid var(--border); padding: 1px 5px; border-radius: 4px; font-family: ui-monospace, Consolas, monospace; }
   .audit-err-msg { font-size: 10.5px; color: #fca5a5; background: rgba(239,68,68,.1); padding: 4px 6px; border-radius: 4px; margin-top: 2px; word-break: break-all; }
+
+  [hidden] { display: none !important; }
+
+  /* Connection notice (server closed the socket, e.g. untrusted extension id) */
+  .notice { flex-shrink: 0; margin: 10px 16px 0; padding: 9px 11px; border: 1px solid #7f1d1d; background: rgba(239,68,68,.08); border-radius: 8px; display: flex; flex-direction: column; gap: 6px; font-size: 11.5px; color: var(--muted); }
+  .notice-title { color: #fca5a5; font-weight: 600; font-size: 12px; }
+  .notice-help { display: flex; flex-direction: column; gap: 6px; }
+  .notice-step { display: flex; flex-direction: column; gap: 3px; }
+  .notice code { font-family: ui-monospace, Consolas, monospace; font-size: 10.5px; color: var(--foreground); background: #1c1c21; border: 1px solid var(--border); border-radius: 4px; padding: 2px 5px; word-break: break-all; user-select: text; }
+  .notice-id { display: flex; align-items: center; gap: 6px; }
+  .notice-id > span { white-space: nowrap; }
+  .notice-id code { flex: 1; min-width: 0; }
+
+  /* Permission hint under the search bar */
+  .perm-note { flex-shrink: 0; padding: 0 16px 8px; font-size: 10.5px; line-height: 1.4; color: var(--muted-fg); }
 </style>
 </head>
 <body>
@@ -162,6 +177,26 @@
   <div class="t"><b data-i18n="extName">Browser MCP Bridge</b><span id="ver"></span></div>
   <div id="pill" class="badge off"><span class="dot"></span><span id="pillTx">…</span></div>
 </header>
+<div id="trustBox" class="notice" role="alert" hidden>
+  <div id="noticeTitle" class="notice-title"></div>
+  <div id="trustHelp" class="notice-help" hidden>
+    <div data-i18n="trustRejectedBody">This extension ID is not on the server's trusted list. Do one of the following, then restart the MCP server:</div>
+    <div class="notice-step">
+      <span data-i18n="trustOptEnv">Set this environment variable for the MCP server:</span>
+      <code id="trustEnv"></code>
+    </div>
+    <div class="notice-step">
+      <span data-i18n="trustOptReset">Or delete this file to pair again with the next extension that connects:</span>
+      <code>~/.browser-mcp/trusted-extensions.json</code>
+    </div>
+  </div>
+  <code id="closeInfo" hidden></code>
+  <div id="trustIdRow" class="notice-id" hidden>
+    <span data-i18n="extensionIdLabel">Extension ID</span>
+    <code id="extId"></code>
+    <button id="copyId" type="button" class="btn-xs" data-i18n="btnCopy">Copy</button>
+  </div>
+</div>
 <div id="activeBar" class="active-bar" style="display:none">
   <span id="activeTag" class="active-tag" data-i18n="activeTabTag">🌐 Tab</span>
   <span id="activeTitle" class="active-title">…</span>
@@ -184,6 +219,7 @@
     <button id="allOn" class="btn" data-i18n="btnAll">All</button>
     <button id="allOff" class="btn" data-i18n="btnNone">None</button>
   </div>
+  <div class="perm-note" data-i18n="permsAgentNote">The AI agent can only turn permissions off. Turning them back on is only possible here.</div>
   <div id="cats"></div>
 </div>
 <div id="paneHistory" class="tab-pane hidden">

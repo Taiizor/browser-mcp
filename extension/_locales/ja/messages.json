@@ -27,6 +27,18 @@
     "message": "接続中…",
     "description": "Status badge while connecting"
   },
+  "statusRejected": {
+    "message": "拒否されました",
+    "description": "Status badge when the MCP server refused the connection"
+  },
+  "statusPairedTitle": {
+    "message": "MCPサーバーとペアリング済み",
+    "description": "Status badge tooltip when the server completed the handshake"
+  },
+  "statusHandshakeTitle": {
+    "message": "接続済み、MCPサーバーのハンドシェイクを待機中",
+    "description": "Status badge tooltip while connected but the server handshake is pending"
+  },
   "activeTabTag": {
     "message": "🌐 タブ",
     "description": "Active tab prefix"
@@ -54,6 +66,10 @@
   "noResults": {
     "message": "結果が見つかりません",
     "description": "Search no results text"
+  },
+  "permsAgentNote": {
+    "message": "AIエージェントは権限をオフにすることしかできません。再びオンにできるのはここだけです。",
+    "description": "Hint under the permission search: the agent can only disable permissions"
   },
   "executionHistory": {
     "message": "実行履歴",
@@ -102,6 +118,38 @@
   "langAuto": {
     "message": "🌐 自動",
     "description": "Auto language label"
+  },
+  "trustRejectedTitle": {
+    "message": "MCPサーバーがこの拡張機能を拒否しました",
+    "description": "Notice title when the MCP server rejected this extension id (close code 4003)"
+  },
+  "trustRejectedBody": {
+    "message": "この拡張機能のIDはサーバーの信頼済みリストにありません。次のいずれかを行ってから、MCPサーバーを再起動してください:",
+    "description": "Notice text explaining how to make the MCP server trust this extension"
+  },
+  "trustOptEnv": {
+    "message": "MCPサーバーに次の環境変数を設定します:",
+    "description": "Notice option: environment variable to trust this extension id"
+  },
+  "trustOptReset": {
+    "message": "または、このファイルを削除すると、次に接続した拡張機能と再ペアリングされます:",
+    "description": "Notice option: delete the trusted-extensions file to pair again"
+  },
+  "extensionIdLabel": {
+    "message": "拡張機能ID",
+    "description": "Label for this extension's id"
+  },
+  "btnCopy": {
+    "message": "コピー",
+    "description": "Copy button"
+  },
+  "copied": {
+    "message": "コピーしました",
+    "description": "Copy button feedback after copying"
+  },
+  "serverClosedTitle": {
+    "message": "MCPサーバーが接続を切断しました",
+    "description": "Notice title when the MCP server closed the connection with another code"
   },
   "cat_tabs": {
     "message": "タブとウィンドウ",

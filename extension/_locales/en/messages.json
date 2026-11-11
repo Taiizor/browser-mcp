@@ -27,6 +27,18 @@
     "message": "Connecting…",
     "description": "Status badge while connecting"
   },
+  "statusRejected": {
+    "message": "Rejected",
+    "description": "Status badge when the MCP server refused the connection"
+  },
+  "statusPairedTitle": {
+    "message": "Paired with the MCP server",
+    "description": "Status badge tooltip when the server completed the handshake"
+  },
+  "statusHandshakeTitle": {
+    "message": "Connected, waiting for the MCP server handshake",
+    "description": "Status badge tooltip while connected but the server handshake is pending"
+  },
   "activeTabTag": {
     "message": "🌐 Tab",
     "description": "Active tab prefix"
@@ -54,6 +66,10 @@
   "noResults": {
     "message": "No results",
     "description": "Search no results text"
+  },
+  "permsAgentNote": {
+    "message": "The AI agent can only turn permissions off. Turning them back on is only possible here.",
+    "description": "Hint under the permission search: the agent can only disable permissions"
   },
   "executionHistory": {
     "message": "Execution History",
@@ -102,6 +118,38 @@
   "langAuto": {
     "message": "🌐 Auto",
     "description": "Auto language label"
+  },
+  "trustRejectedTitle": {
+    "message": "The MCP server rejected this extension",
+    "description": "Notice title when the MCP server rejected this extension id (close code 4003)"
+  },
+  "trustRejectedBody": {
+    "message": "This extension ID is not on the server's trusted list. Do one of the following, then restart the MCP server:",
+    "description": "Notice text explaining how to make the MCP server trust this extension"
+  },
+  "trustOptEnv": {
+    "message": "Set this environment variable for the MCP server:",
+    "description": "Notice option: environment variable to trust this extension id"
+  },
+  "trustOptReset": {
+    "message": "Or delete this file to pair again with the next extension that connects:",
+    "description": "Notice option: delete the trusted-extensions file to pair again"
+  },
+  "extensionIdLabel": {
+    "message": "Extension ID",
+    "description": "Label for this extension's id"
+  },
+  "btnCopy": {
+    "message": "Copy",
+    "description": "Copy button"
+  },
+  "copied": {
+    "message": "Copied",
+    "description": "Copy button feedback after copying"
+  },
+  "serverClosedTitle": {
+    "message": "The MCP server closed the connection",
+    "description": "Notice title when the MCP server closed the connection with another code"
   },
   "cat_tabs": {
     "message": "Tabs & Windows",

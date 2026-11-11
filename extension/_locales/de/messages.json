@@ -27,6 +27,18 @@
     "message": "Verbindung wird hergestellt…",
     "description": "Status badge while connecting"
   },
+  "statusRejected": {
+    "message": "Abgelehnt",
+    "description": "Status badge when the MCP server refused the connection"
+  },
+  "statusPairedTitle": {
+    "message": "Mit dem MCP-Server gekoppelt",
+    "description": "Status badge tooltip when the server completed the handshake"
+  },
+  "statusHandshakeTitle": {
+    "message": "Verbunden, warte auf den Handshake des MCP-Servers",
+    "description": "Status badge tooltip while connected but the server handshake is pending"
+  },
   "activeTabTag": {
     "message": "🌐 Tab",
     "description": "Active tab prefix"
@@ -54,6 +66,10 @@
   "noResults": {
     "message": "Keine Ergebnisse",
     "description": "Search no results text"
+  },
+  "permsAgentNote": {
+    "message": "Der KI-Agent kann Berechtigungen nur deaktivieren. Wieder aktivieren lassen sie sich nur hier.",
+    "description": "Hint under the permission search: the agent can only disable permissions"
   },
   "executionHistory": {
     "message": "Ausführungsverlauf",
@@ -102,6 +118,38 @@
   "langAuto": {
     "message": "🌐 Automatisch",
     "description": "Auto language label"
+  },
+  "trustRejectedTitle": {
+    "message": "Der MCP-Server hat diese Erweiterung abgelehnt",
+    "description": "Notice title when the MCP server rejected this extension id (close code 4003)"
+  },
+  "trustRejectedBody": {
+    "message": "Diese Erweiterungs-ID steht nicht auf der Liste vertrauenswürdiger IDs des Servers. Führen Sie einen der folgenden Schritte aus und starten Sie den MCP-Server anschließend neu:",
+    "description": "Notice text explaining how to make the MCP server trust this extension"
+  },
+  "trustOptEnv": {
+    "message": "Setzen Sie diese Umgebungsvariable für den MCP-Server:",
+    "description": "Notice option: environment variable to trust this extension id"
+  },
+  "trustOptReset": {
+    "message": "Oder löschen Sie diese Datei, um erneut mit der nächsten Erweiterung zu koppeln, die sich verbindet:",
+    "description": "Notice option: delete the trusted-extensions file to pair again"
+  },
+  "extensionIdLabel": {
+    "message": "Erweiterungs-ID",
+    "description": "Label for this extension's id"
+  },
+  "btnCopy": {
+    "message": "Kopieren",
+    "description": "Copy button"
+  },
+  "copied": {
+    "message": "Kopiert",
+    "description": "Copy button feedback after copying"
+  },
+  "serverClosedTitle": {
+    "message": "Der MCP-Server hat die Verbindung geschlossen",
+    "description": "Notice title when the MCP server closed the connection with another code"
   },
   "cat_tabs": {
     "message": "Tabs & Fenster",

@@ -27,6 +27,18 @@
     "message": "Conectando…",
     "description": "Status badge while connecting"
   },
+  "statusRejected": {
+    "message": "Rechazado",
+    "description": "Status badge when the MCP server refused the connection"
+  },
+  "statusPairedTitle": {
+    "message": "Emparejado con el servidor MCP",
+    "description": "Status badge tooltip when the server completed the handshake"
+  },
+  "statusHandshakeTitle": {
+    "message": "Conectado, esperando el protocolo de enlace del servidor MCP",
+    "description": "Status badge tooltip while connected but the server handshake is pending"
+  },
   "activeTabTag": {
     "message": "🌐 Pestaña",
     "description": "Active tab prefix"
@@ -54,6 +66,10 @@
   "noResults": {
     "message": "Sin resultados",
     "description": "Search no results text"
+  },
+  "permsAgentNote": {
+    "message": "El agente de IA solo puede desactivar permisos. Volver a activarlos solo es posible desde aquí.",
+    "description": "Hint under the permission search: the agent can only disable permissions"
   },
   "executionHistory": {
     "message": "Historial de ejecución",
@@ -102,6 +118,38 @@
   "langAuto": {
     "message": "🌐 Automático",
     "description": "Auto language label"
+  },
+  "trustRejectedTitle": {
+    "message": "El servidor MCP rechazó esta extensión",
+    "description": "Notice title when the MCP server rejected this extension id (close code 4003)"
+  },
+  "trustRejectedBody": {
+    "message": "El ID de esta extensión no está en la lista de confianza del servidor. Realiza una de las siguientes acciones y luego reinicia el servidor MCP:",
+    "description": "Notice text explaining how to make the MCP server trust this extension"
+  },
+  "trustOptEnv": {
+    "message": "Define esta variable de entorno para el servidor MCP:",
+    "description": "Notice option: environment variable to trust this extension id"
+  },
+  "trustOptReset": {
+    "message": "O elimina este archivo para volver a emparejar con la próxima extensión que se conecte:",
+    "description": "Notice option: delete the trusted-extensions file to pair again"
+  },
+  "extensionIdLabel": {
+    "message": "ID de la extensión",
+    "description": "Label for this extension's id"
+  },
+  "btnCopy": {
+    "message": "Copiar",
+    "description": "Copy button"
+  },
+  "copied": {
+    "message": "Copiado",
+    "description": "Copy button feedback after copying"
+  },
+  "serverClosedTitle": {
+    "message": "El servidor MCP cerró la conexión",
+    "description": "Notice title when the MCP server closed the connection with another code"
   },
   "cat_tabs": {
     "message": "Pestañas y ventanas",

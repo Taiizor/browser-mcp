@@ -29,5 +29,126 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-      - name: Validate manifest.json
-        run: bun -e "JSON.parse(await Bun.file('extension/manifest.json').text()); console.log('manifest OK')"
+
+      # Every extension/*.js is compiled (never executed) as a classic script,
+      # the way Chrome loads the service worker, content and popup scripts.
+      - name: Syntax-check extension scripts
+        run: |
+          cat > "$RUNNER_TEMP/check-syntax.ts" <<'EOF'
+          import { readdirSync, readFileSync } from "node:fs";
+          const files = readdirSync("extension").filter((f) => f.endsWith(".js")).sort();
+          if (!files.length) {
+            console.log("::error::no extension/*.js files found");
+            process.exit(1);
+          }
+          let failed = 0;
+          for (const f of files) {
+            const src = readFileSync(`extension/${f}`, "utf8");
+            try {
+              new Function(src); // parse only: the function is never called
+              console.log(`ok    extension/${f}`);
+            } catch (e) {
+              failed++;
+              console.log(`::error file=extension/${f}::${(e as Error).message}`);
+            }
+          }
+          process.exit(failed ? 1 : 0);
+          EOF
+          bun "$RUNNER_TEMP/check-syntax.ts"
+
+      # manifest.json and every _locales/*/messages.json must parse, every locale
+      # must have exactly the key set (and placeholders) of the default locale,
+      # and every message key referenced by the manifest / popup must exist.
+      - name: Validate manifest.json and locales
+        run: |
+          cat > "$RUNNER_TEMP/check-manifest-locales.ts" <<'EOF'
+          import { existsSync, readdirSync, readFileSync } from "node:fs";
+          let failed = 0;
+          const fail = (file: string, msg: string) => {
+            failed++;
+            console.log(`::error file=${file}::${msg}`);
+          };
+          const readJson = (file: string): any => {
+            try {
+              return JSON.parse(readFileSync(file, "utf8"));
+            } catch (e) {
+              fail(file, `invalid JSON: ${(e as Error).message}`);
+              return null;
+            }
+          };
+
+          const manifestFile = "extension/manifest.json";
+          const manifest = readJson(manifestFile);
+          if (manifest) {
+            if (manifest.manifest_version !== 3) fail(manifestFile, "manifest_version must be 3");
+            if (typeof manifest.version !== "string" || !/^\d+(\.\d+){0,3}$/.test(manifest.version)) {
+              fail(manifestFile, `invalid version: ${JSON.stringify(manifest.version)}`);
+            }
+            console.log(`ok    ${manifestFile} (v${manifest.version})`);
+          }
+
+          const defaultLocale = manifest?.default_locale ?? "en";
+          const base = readJson(`extension/_locales/${defaultLocale}/messages.json`);
+          if (!base) process.exit(1);
+          const baseKeys = Object.keys(base).sort();
+          const placeholderKeys = (m: any, k: string) => JSON.stringify(Object.keys(m?.[k]?.placeholders ?? {}).sort());
+
+          for (const loc of readdirSync("extension/_locales").sort()) {
+            const file = `extension/_locales/${loc}/messages.json`;
+            if (!existsSync(file)) {
+              fail(file, "missing messages.json");
+              continue;
+            }
+            const m = readJson(file);
+            if (!m) continue;
+            const before = failed;
+            const missing = baseKeys.filter((k) => !(k in m));
+            const extra = Object.keys(m).filter((k) => !(k in base));
+            if (missing.length) fail(file, `missing keys: ${missing.join(", ")}`);
+            if (extra.length) fail(file, `keys not in ${defaultLocale}: ${extra.join(", ")}`);
+            for (const [k, v] of Object.entries<any>(m)) {
+              if (typeof v?.message !== "string") fail(file, `${k}: "message" must be a string`);
+              if (k in base && placeholderKeys(m, k) !== placeholderKeys(base, k)) fail(file, `${k}: placeholders differ from ${defaultLocale}`);
+            }
+            if (failed === before) console.log(`ok    ${file} (${Object.keys(m).length} keys)`);
+          }
+
+          // Message keys referenced by the manifest, popup.html and popup.js.
+          const used = new Map<string, string>();
+          const manifestText = readFileSync(manifestFile, "utf8");
+          for (const [, k] of manifestText.matchAll(/__MSG_([A-Za-z0-9_@]+)__/g)) used.set(k, manifestFile);
+          const popupHtml = readFileSync("extension/popup.html", "utf8");
+          for (const [, k] of popupHtml.matchAll(/data-i18n(?:-placeholder|-title)?="([^"]+)"/g)) used.set(k, "extension/popup.html");
+          const popupJs = readFileSync("extension/popup.js", "utf8");
+          for (const [, k] of popupJs.matchAll(/\bt\("([A-Za-z0-9_]+)"\s*[,)]/g)) used.set(k, "extension/popup.js");
+          // Permission category titles are looked up as cat_<id> (see PERM_CATS in background.js).
+          const bg = readFileSync("extension/background.js", "utf8");
+          const cats = bg.slice(bg.indexOf("const PERM_CATS"), bg.indexOf("const PERM_ALL"));
+          for (const [, id] of cats.matchAll(/\{\s*id:\s*"([A-Za-z0-9_]+)"/g)) used.set(`cat_${id}`, "extension/background.js");
+          for (const [k, file] of used) {
+            if (!k.startsWith("@@") && !(k in base)) fail(file, `message key "${k}" is not defined in _locales/${defaultLocale}/messages.json`);
+          }
+          console.log(`checked ${used.size} referenced message keys`);
+          process.exit(failed ? 1 : 0);
+          EOF
+          bun "$RUNNER_TEMP/check-manifest-locales.ts"
+
+      # Releases bump mcp-server/package.json, extension/manifest.json and the
+      # McpServer version in mcp-server/src/index.ts together.
+      - name: Check version sync
+        run: |
+          cat > "$RUNNER_TEMP/check-versions.ts" <<'EOF'
+          import { readFileSync } from "node:fs";
+          const manifest = JSON.parse(readFileSync("extension/manifest.json", "utf8")).version;
+          const pkg = JSON.parse(readFileSync("mcp-server/package.json", "utf8")).version;
+          const src = readFileSync("mcp-server/src/index.ts", "utf8");
+          const server = /new McpServer\(\{[^}]*?version:\s*"([^"]+)"/s.exec(src)?.[1];
+          console.log(`extension/manifest.json  ${manifest}`);
+          console.log(`mcp-server/package.json  ${pkg}`);
+          console.log(`McpServer (index.ts)     ${server ?? "not found"}`);
+          if (!server || manifest !== pkg || pkg !== server) {
+            console.log("::error::version mismatch: keep extension/manifest.json, mcp-server/package.json and the McpServer version in mcp-server/src/index.ts in sync");
+            process.exit(1);
+          }
+          EOF
+          bun "$RUNNER_TEMP/check-versions.ts"
