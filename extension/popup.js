@@ -5,12 +5,25 @@
 document.addEventListener("contextmenu", (e) => e.preventDefault());
 
 const $ = (s) => document.querySelector(s);
+const t = (k, def) => (typeof I18N !== "undefined" ? I18N.t(k, def) : def);
 let CATS = [];
 let disabled = new Set();
 let openCat = null;
+// Number of permission writes in flight; storage echoes are ignored meanwhile
+// because the write's own response carries the authoritative state.
+let pendingPermWrites = 0;
+let lastExtensionId = "";
 
 async function bg(msg) {
   return chrome.runtime.sendMessage(msg);
+}
+
+// Small DOM helper: every dynamic value goes through textContent (never innerHTML).
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined && text !== null) e.textContent = String(text);
+  return e;
 }
 
 function switchEl(on, onChange) {
@@ -32,21 +45,86 @@ function switchEl(on, onChange) {
 
 let currentPort = 8765;
 
+function extensionId() {
+  return lastExtensionId || (chrome.runtime && chrome.runtime.id) || "";
+}
+
 function updateVer(port) {
   const v = chrome.runtime.getManifest().version;
-  const el = $("#ver");
-  if (el) el.textContent = `v${v} · 127.0.0.1:${port}`;
+  const ver = $("#ver");
+  if (!ver) return;
+  ver.textContent = `v${v} · 127.0.0.1:${port}`;
+  const id = extensionId();
+  ver.title = id ? `${t("extensionIdLabel", "Extension ID")}: ${id}` : "";
+}
+
+// Shows why the MCP server closed the connection (application close codes 4000-4999).
+// 4003 = the server does not trust this extension id; anything else is shown generically.
+function updateCloseNotice(r) {
+  const box = $("#trustBox");
+  if (!box) return;
+  const lc = r && !r.bridgeConnected && r.lastClose && typeof r.lastClose === "object" ? r.lastClose : null;
+  const code = lc ? Number(lc.code) : 0;
+  if (!lc || !(code >= 4000 && code <= 4999)) {
+    box.hidden = true;
+    return;
+  }
+  const untrusted = code === 4003;
+  const id = extensionId();
+  const title = $("#noticeTitle");
+  if (title) {
+    title.textContent = untrusted
+      ? t("trustRejectedTitle", "The MCP server rejected this extension")
+      : t("serverClosedTitle", "The MCP server closed the connection");
+  }
+  const help = $("#trustHelp");
+  if (help) help.hidden = !untrusted;
+  const idRow = $("#trustIdRow");
+  if (idRow) idRow.hidden = !untrusted || !id;
+  const env = $("#trustEnv");
+  if (env) env.textContent = `BROWSER_MCP_EXTENSION_IDS=${id}`;
+  const idEl = $("#extId");
+  if (idEl) idEl.textContent = id;
+  const info = $("#closeInfo");
+  if (info) {
+    const reason = typeof lc.reason === "string" ? lc.reason.slice(0, 200) : "";
+    info.textContent = reason ? `${code} ${reason}` : String(code);
+    info.hidden = untrusted;
+  }
+  box.hidden = false;
+}
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {}
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy") === true;
+    ta.remove();
+    return ok;
+  } catch {
+    return false;
+  }
 }
 
 async function refreshStatus() {
   const pill = $("#pill");
   const tx = $("#pillTx");
-  const set = (on, label) => {
+  const set = (on, label, title = "") => {
     pill.className = "badge " + (on ? "on" : "off");
     tx.textContent = label;
+    pill.title = title;
   };
   try {
     const r = await bg({ type: "mcp-status" });
+    if (r && typeof r.extensionId === "string" && r.extensionId) lastExtensionId = r.extensionId;
     if (r && r.port) {
       currentPort = r.port;
       const inp = $("#portInput");
@@ -64,27 +142,69 @@ async function refreshStatus() {
     } else if (activeBar) {
       activeBar.style.display = "none";
     }
-    const t = (k, def) => (typeof I18N !== "undefined" ? I18N.t(k, def) : def);
-    if (r && r.bridgeConnected) set(true, t("statusConnected", "Connected"));
-    else set(false, t("statusNoServer", "No server"));
+    updateCloseNotice(r);
+    const closeCode = r && r.lastClose && typeof r.lastClose === "object" ? Number(r.lastClose.code) : 0;
+    if (r && r.bridgeConnected) {
+      // `paired` = the server answered our hello with a welcome (protocol 2).
+      const title =
+        r.paired === true
+          ? t("statusPairedTitle", "Paired with the MCP server")
+          : r.paired === false
+            ? t("statusHandshakeTitle", "Connected, waiting for the MCP server handshake")
+            : "";
+      set(true, t("statusConnected", "Connected"), title);
+    } else if (closeCode >= 4000 && closeCode <= 4999) {
+      set(false, t("statusRejected", "Rejected"));
+    } else {
+      set(false, t("statusNoServer", "No server"));
+    }
   } catch {
-    const t = (k, def) => (typeof I18N !== "undefined" ? I18N.t(k, def) : def);
     set(false, t("statusError", "Error"));
   }
 }
 
-async function push() {
-  // Write current UI state to background
-  const actions = {};
-  for (const c of CATS) for (const a of c.actions) actions[a] = !disabled.has(a);
-  await bg({ type: "mcp-perms-set", actions });
+// Apply permission changes ({action: enabled}) and send ONLY the actions whose
+// state actually changes, so concurrent changes made elsewhere (another popup,
+// or the agent disabling an action) are never overwritten by a stale snapshot.
+async function setPerms(changes) {
+  const delta = {};
+  for (const [a, on] of Object.entries(changes)) {
+    if (on === disabled.has(a)) delta[a] = on;
+  }
+  if (!Object.keys(delta).length) return;
+  for (const [a, on] of Object.entries(delta)) {
+    if (on) disabled.delete(a);
+    else disabled.add(a);
+  }
+  pendingPermWrites++;
+  try {
+    const r = await bg({ type: "mcp-perms-set", actions: delta });
+    if (r && Array.isArray(r.disabled)) disabled = new Set(r.disabled);
+  } catch {
+    await reloadPerms();
+  } finally {
+    pendingPermWrites--;
+  }
+}
+
+async function reloadPerms() {
+  try {
+    const r = await bg({ type: "mcp-perms-get" });
+    if (r && Array.isArray(r.cats)) CATS = r.cats;
+    if (r && Array.isArray(r.disabled)) disabled = new Set(r.disabled);
+  } catch {}
+}
+
+function allActions() {
+  const out = [];
+  for (const c of CATS) for (const a of c.actions) out.push(a);
+  return out;
 }
 
 function render(filter = "") {
-  const t = (k, def) => (typeof I18N !== "undefined" ? I18N.t(k, def) : def);
   const box = $("#cats");
   const prevScroll = box.scrollTop;
-  box.innerHTML = "";
+  box.replaceChildren();
   const q = filter.trim().toLowerCase();
   let shown = 0;
   for (const c of CATS) {
@@ -107,11 +227,9 @@ function render(filter = "") {
     arr.className = "arr";
     arr.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 6 6 6-6 6"/></svg>`;
     const sw = switchEl(on === acts.length, async (v) => {
-      for (const a of (q ? acts : c.actions)) {
-        if (v) disabled.delete(a);
-        else disabled.add(a);
-      }
-      await push();
+      const changes = {};
+      for (const a of (q ? acts : c.actions)) changes[a] = v;
+      await setPerms(changes);
       render($("#q").value);
     });
     head.append(nm, ct, sw.el, arr);
@@ -133,9 +251,7 @@ function render(filter = "") {
       const code = document.createElement("code");
       code.textContent = a;
       const s2 = switchEl(!disabled.has(a), async (v) => {
-        if (v) disabled.delete(a);
-        else disabled.add(a);
-        await push();
+        await setPerms({ [a]: v });
         render($("#q").value);
       });
       row.append(code, s2.el);
@@ -169,49 +285,39 @@ async function applyPort() {
   await refreshStatus();
 }
 
-function escapeHtml(s) {
-  return String(s || "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
 async function refreshHistory() {
-  const t = (k, def) => (typeof I18N !== "undefined" ? I18N.t(k, def) : def);
   try {
     const r = await bg({ type: "mcp-history-get" });
-    const list = r?.history || [];
+    const list = Array.isArray(r?.history) ? r.history : [];
     const badge = $("#histBadge");
     if (badge) badge.textContent = String(list.length);
     const box = $("#histList");
     if (!box) return;
     if (!list.length) {
-      box.innerHTML = `<div class="hist-empty">${t("noCommands", "No commands executed yet")}</div>`;
+      box.replaceChildren(el("div", "hist-empty", t("noCommands", "No commands executed yet")));
       return;
     }
-    box.innerHTML = list
-      .map((item) => {
-        const timeStr = new Date(item.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-        const tabBadge = item.tabId ? `<span class="audit-badge">${t("tabBadgePrefix", "Tab #")}${item.tabId}</span>` : "";
-        const durBadge = `<span class="audit-badge">${item.durationMs}ms</span>`;
-        const errMsg = !item.ok ? `<div class="audit-err-msg">${escapeHtml(item.error || t("executionFailed", "Execution failed"))}</div>` : "";
-        return `<div class="audit-card ${item.ok ? "" : "err"}">
-          <div class="audit-top">
-            <div class="audit-name">
-              <span class="audit-dot"></span>
-              <code>${escapeHtml(item.action)}</code>
-            </div>
-            <span class="audit-time">${timeStr}</span>
-          </div>
-          <div class="audit-meta-row">
-            ${durBadge}
-            ${tabBadge}
-          </div>
-          ${errMsg}
-        </div>`;
-      })
-      .join("");
+    // Built with DOM APIs + textContent only: history entries (action, tabId,
+    // error text) originate from bridge peers and must never be parsed as HTML.
+    const frag = document.createDocumentFragment();
+    for (const item of list) {
+      if (!item || typeof item !== "object") continue;
+      const ok = !!item.ok;
+      const timeStr = new Date(item.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      const dur = Number(item.durationMs);
+      const card = el("div", "audit-card" + (ok ? "" : " err"));
+      const top = el("div", "audit-top");
+      const name = el("div", "audit-name");
+      name.append(el("span", "audit-dot"), el("code", null, item.action ?? ""));
+      top.append(name, el("span", "audit-time", timeStr));
+      const meta = el("div", "audit-meta-row");
+      meta.appendChild(el("span", "audit-badge", `${Number.isFinite(dur) ? Math.round(dur) : 0}ms`));
+      if (item.tabId) meta.appendChild(el("span", "audit-badge", `${t("tabBadgePrefix", "Tab #")}${item.tabId}`));
+      card.append(top, meta);
+      if (!ok) card.appendChild(el("div", "audit-err-msg", item.error || t("executionFailed", "Execution failed")));
+      frag.appendChild(card);
+    }
+    box.replaceChildren(frag);
   } catch {}
 }
 
@@ -235,26 +341,32 @@ function switchTab(name) {
   await refreshStatus();
   updateVer(currentPort);
   await refreshHistory();
-  try {
-    const r = await bg({ type: "mcp-perms-get" });
-    CATS = r.cats || [];
-    disabled = new Set(r.disabled || []);
-  } catch {
-    CATS = [];
-  }
+  await reloadPerms();
   render();
   $("#q").addEventListener("input", (e) => render(e.target.value));
   $("#allOn").addEventListener("click", async () => {
-    disabled.clear();
-    await push();
+    await setPerms(Object.fromEntries(allActions().map((a) => [a, true])));
     render($("#q").value);
   });
   $("#allOff").addEventListener("click", async () => {
-    disabled.clear();
-    for (const c of CATS) for (const a of c.actions) disabled.add(a);
-    await push();
+    await setPerms(Object.fromEntries(allActions().map((a) => [a, false])));
     render($("#q").value);
   });
+
+  const copyBtn = $("#copyId");
+  if (copyBtn) {
+    let resetTimer = null;
+    copyBtn.addEventListener("click", async () => {
+      const id = extensionId();
+      if (!id) return;
+      const ok = await copyText(id);
+      copyBtn.textContent = ok ? t("copied", "Copied") : t("btnCopy", "Copy");
+      if (resetTimer) clearTimeout(resetTimer);
+      resetTimer = setTimeout(() => {
+        copyBtn.textContent = t("btnCopy", "Copy");
+      }, 1500);
+    });
+  }
 
   const btnNavPerms = $("#navPerms");
   const btnNavHist = $("#navHistory");
@@ -379,6 +491,12 @@ function switchTab(name) {
 
   if (chrome.storage && chrome.storage.onChanged) {
     chrome.storage.onChanged.addListener((changes, area) => {
+      // Permission set changed elsewhere (agent self-restriction, another popup):
+      // re-sync so the next toggle never sends a stale state.
+      if (area === "local" && changes.mcpDisabled && Array.isArray(changes.mcpDisabled.newValue) && pendingPermWrites === 0) {
+        disabled = new Set(changes.mcpDisabled.newValue);
+        render($("#q").value);
+      }
       if (area === "local" && changes.mcpPort && changes.mcpPort.newValue) {
         const np = Number(changes.mcpPort.newValue);
         if (np > 0 && np < 65536) {

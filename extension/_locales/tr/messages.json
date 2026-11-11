@@ -27,6 +27,18 @@
     "message": "Bağlanıyor…",
     "description": "Status badge while connecting"
   },
+  "statusRejected": {
+    "message": "Reddedildi",
+    "description": "Status badge when the MCP server refused the connection"
+  },
+  "statusPairedTitle": {
+    "message": "MCP sunucusuyla eşleştirildi",
+    "description": "Status badge tooltip when the server completed the handshake"
+  },
+  "statusHandshakeTitle": {
+    "message": "Bağlandı, MCP sunucusunun el sıkışması bekleniyor",
+    "description": "Status badge tooltip while connected but the server handshake is pending"
+  },
   "activeTabTag": {
     "message": "🌐 Sekme",
     "description": "Active tab prefix"
@@ -54,6 +66,10 @@
   "noResults": {
     "message": "Sonuç bulunamadı",
     "description": "Search no results text"
+  },
+  "permsAgentNote": {
+    "message": "Yapay zekâ ajanı izinleri yalnızca kapatabilir. Yeniden açmak yalnızca buradan mümkündür.",
+    "description": "Hint under the permission search: the agent can only disable permissions"
   },
   "executionHistory": {
     "message": "Çalıştırma Geçmişi",
@@ -102,6 +118,38 @@
   "langAuto": {
     "message": "🌐 Otomatik",
     "description": "Auto language label"
+  },
+  "trustRejectedTitle": {
+    "message": "MCP sunucusu bu eklentiyi reddetti",
+    "description": "Notice title when the MCP server rejected this extension id (close code 4003)"
+  },
+  "trustRejectedBody": {
+    "message": "Bu eklentinin kimliği sunucunun güvenilenler listesinde yok. Aşağıdakilerden birini yapın, ardından MCP sunucusunu yeniden başlatın:",
+    "description": "Notice text explaining how to make the MCP server trust this extension"
+  },
+  "trustOptEnv": {
+    "message": "MCP sunucusu için şu ortam değişkenini ayarlayın:",
+    "description": "Notice option: environment variable to trust this extension id"
+  },
+  "trustOptReset": {
+    "message": "Ya da bağlanan bir sonraki eklentiyle yeniden eşleşmek için bu dosyayı silin:",
+    "description": "Notice option: delete the trusted-extensions file to pair again"
+  },
+  "extensionIdLabel": {
+    "message": "Eklenti kimliği",
+    "description": "Label for this extension's id"
+  },
+  "btnCopy": {
+    "message": "Kopyala",
+    "description": "Copy button"
+  },
+  "copied": {
+    "message": "Kopyalandı",
+    "description": "Copy button feedback after copying"
+  },
+  "serverClosedTitle": {
+    "message": "MCP sunucusu bağlantıyı kapattı",
+    "description": "Notice title when the MCP server closed the connection with another code"
   },
   "cat_tabs": {
     "message": "Sekmeler ve Pencereler",

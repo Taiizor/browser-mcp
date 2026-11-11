@@ -27,6 +27,18 @@
     "message": "Подключение…",
     "description": "Status badge while connecting"
   },
+  "statusRejected": {
+    "message": "Отклонено",
+    "description": "Status badge when the MCP server refused the connection"
+  },
+  "statusPairedTitle": {
+    "message": "Сопряжено с MCP-сервером",
+    "description": "Status badge tooltip when the server completed the handshake"
+  },
+  "statusHandshakeTitle": {
+    "message": "Подключено, ожидание рукопожатия MCP-сервера",
+    "description": "Status badge tooltip while connected but the server handshake is pending"
+  },
   "activeTabTag": {
     "message": "🌐 Вкладка",
     "description": "Active tab prefix"
@@ -54,6 +66,10 @@
   "noResults": {
     "message": "Нет результатов",
     "description": "Search no results text"
+  },
+  "permsAgentNote": {
+    "message": "ИИ-агент может только отключать разрешения. Включить их снова можно только здесь.",
+    "description": "Hint under the permission search: the agent can only disable permissions"
   },
   "executionHistory": {
     "message": "История выполнения",
@@ -102,6 +118,38 @@
   "langAuto": {
     "message": "🌐 Авто",
     "description": "Auto language label"
+  },
+  "trustRejectedTitle": {
+    "message": "MCP-сервер отклонил это расширение",
+    "description": "Notice title when the MCP server rejected this extension id (close code 4003)"
+  },
+  "trustRejectedBody": {
+    "message": "Идентификатора этого расширения нет в списке доверенных на сервере. Выполните одно из следующих действий, затем перезапустите MCP-сервер:",
+    "description": "Notice text explaining how to make the MCP server trust this extension"
+  },
+  "trustOptEnv": {
+    "message": "Задайте эту переменную окружения для MCP-сервера:",
+    "description": "Notice option: environment variable to trust this extension id"
+  },
+  "trustOptReset": {
+    "message": "Или удалите этот файл, чтобы заново выполнить сопряжение со следующим подключившимся расширением:",
+    "description": "Notice option: delete the trusted-extensions file to pair again"
+  },
+  "extensionIdLabel": {
+    "message": "ID расширения",
+    "description": "Label for this extension's id"
+  },
+  "btnCopy": {
+    "message": "Копировать",
+    "description": "Copy button"
+  },
+  "copied": {
+    "message": "Скопировано",
+    "description": "Copy button feedback after copying"
+  },
+  "serverClosedTitle": {
+    "message": "MCP-сервер закрыл соединение",
+    "description": "Notice title when the MCP server closed the connection with another code"
   },
   "cat_tabs": {
     "message": "Вкладки и окна",
