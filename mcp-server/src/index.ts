@@ -1,3 +1,6 @@
+// Must stay the first import: drops what Bun loaded from the working directory's .env files
+// before any other module reads the environment (see env.ts).
+import "./isolate-env.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -15,6 +18,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { BridgeClient, ExtensionBridge, type IBridge } from "./bridge.js";
+import { resolvePort as resolveBridgePort } from "./env.js";
 
 // ---------- CLI ----------
 // Invalid explicit values are fatal: silently falling back to the default
@@ -91,20 +95,16 @@ function parseCli(argv: string[]): CliOptions {
 const CLI = parseCli(process.argv.slice(2));
 
 function resolvePort(): number {
-  if (CLI.port !== undefined) return CLI.port;
-  // BROWSER_MCP_PORT wins over the generic PORT (README documents both).
-  const own = process.env.BROWSER_MCP_PORT;
-  if (own !== undefined && own.trim() !== "") return parsePortValue(own, "BROWSER_MCP_PORT");
-  const generic = process.env.PORT;
-  if (generic !== undefined && generic.trim() !== "") {
-    const port = parsePortValue(generic, "PORT");
-    // PORT is often exported for unrelated dev servers: say loudly where the port came from.
+  // --port -> BROWSER_MCP_PORT -> 8765. The generic PORT belongs to the project or shell the
+  // client runs in and is never used (env.ts).
+  const choice = resolveBridgePort(CLI.port, process.env, parsePortValue);
+  if (choice.ignoredPort !== undefined && choice.source === "default") {
     console.error(
-      `[browser-mcp] using port ${port} from the PORT environment variable (set BROWSER_MCP_PORT or --port to override; the extension must use the same port)`
+      `[browser-mcp] ignoring PORT=${choice.ignoredPort} (it belongs to the project or shell the client runs in); ` +
+        `using ${choice.port} - set BROWSER_MCP_PORT or --port to choose the bridge port`
     );
-    return port;
   }
-  return 8765;
+  return choice.port;
 }
 
 const PORT = resolvePort();

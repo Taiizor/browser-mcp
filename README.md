@@ -188,14 +188,28 @@ Alternatively, the legacy VS Code format (`.vscode/mcp.json`) uses a `servers` k
 
 You can configure the WebSocket bridge port from **either** side (server and extension must use the same port):
 - **CLI Flag:** `bun run src/index.ts --port 9000`, `-p 9000`, `--port=9000` or positional `bun run src/index.ts 9000`
-- **Environment Variable:** `BROWSER_MCP_PORT=9000` or `PORT=9000`
+- **Environment Variable:** `BROWSER_MCP_PORT=9000`
 - **Extension Popup:** Type the port in the popup footer and click **Set** (or press Enter). Click **↺** to reset to `8765`. Reconnection is instant without reloading the extension.
 
-Server precedence: CLI flag → `BROWSER_MCP_PORT` → `PORT` (logged to stderr, since `PORT` is often set
-for unrelated dev servers) → `8765`. An invalid value (not an integer 1-65535) is fatal: the server exits
+Server precedence: CLI flag → `BROWSER_MCP_PORT` → `8765`. The generic `PORT` variable is **never**
+used (a notice goes to stderr when it is set): it belongs to the project or shell the MCP client runs
+in, so honouring it would take that project's dev-server port and miss the extension. An invalid value (not an integer 1-65535) is fatal: the server exits
 with code 2 instead of silently using another port. If the port cannot be bound for another reason than
 "already in use" (e.g. `EACCES` on a Windows excluded port range), the server exits with the real cause
 and a hint (`netsh interface ipv4 show excludedportrange protocol=tcp`).
+
+### Project `.env` files
+
+MCP clients start the server with the working directory set to the project the agent works on, and
+Bun loads that project's `.env`, `.env.<mode>`, `.env.local` and `.env.<mode>.local` files into the
+process before any code runs. Their values (`PORT`, `BROWSER`, `CHROME_PATH`, API keys…) have nothing
+to do with Browser MCP, so the server removes them again at startup, before it reads its settings or
+launches a browser, and lists the removed names on stderr. Only exact copies of the file values are
+removed: a value set by the client config or the shell (it wins over the file in Bun) stays, and so do
+`BROWSER_MCP_*` variables and OS essentials such as `PATH`.
+
+To skip loading those files in the first place, start the server with Bun's `--no-env-file` flag
+(Bun ≥ 1.3.3), e.g. `bun --no-env-file run <path-to-repo>/mcp-server/src/index.ts`.
 
 ### Browser Selection (auto-launch)
 
@@ -341,7 +355,7 @@ Unknown arguments only print a warning.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `BROWSER_MCP_PORT` / `PORT` | `8765` | Bridge port (see precedence above) |
+| `BROWSER_MCP_PORT` | `8765` | Bridge port (see precedence above; the generic `PORT` is ignored) |
 | `BROWSER_MCP_EXTENSION_IDS` | — | Comma-separated trusted extension ids (strict, no TOFU); `*` = legacy accept-any |
 | `BROWSER_MCP_HOME` | `~/.browser-mcp` | Config directory (token, trusted ids, sticky browser) |
 | `BROWSER`, `BROWSER_PATH`, `CHROME_PATH` | — | Browser used for auto-launch |
