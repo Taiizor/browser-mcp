@@ -14,6 +14,8 @@
     "dev": "bun --watch run src/index.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
+    "test:unit": "bun test ./test/unit ./src",
+    "test:integration": "bun test ./test/integration",
     "build:binary": "bun scripts/build-binaries.ts",
     "build:binaries": "bun scripts/build-binaries.ts --all"
   },
@@ -25,6 +27,7 @@
   "devDependencies": {
     "@types/bun": "latest",
     "@types/ws": "^8.18.2",
+    "happy-dom": "^21.0.4",
     "typescript": "^7.0.2"
   }
 }

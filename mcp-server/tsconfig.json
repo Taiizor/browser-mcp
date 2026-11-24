@@ -8,5 +8,5 @@
     "outDir": "dist",
     "types": ["bun"]
   },
-  "include": ["src/**/*"]
+  "include": ["src/**/*", "test/**/*"]
 }
