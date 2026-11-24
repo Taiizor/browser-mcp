@@ -1,5 +1,7 @@
 # Build output
 dist/
+# Transient record written by mcp-server's prepack and removed by postpack
+mcp-server/.pack-assets.json
 
 # Node.js
 node_modules/

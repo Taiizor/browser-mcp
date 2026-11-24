@@ -1,13 +1,46 @@
 {
-  "name": "browser-mcp-server",
+  "name": "@taiizor/browser-mcp",
   "version": "0.3.5",
   "description": "Chromium extension bridge MCP server - full browser automation (tabs, DOM, network, console)",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "mcp-server",
+    "browser",
+    "browser-automation",
+    "chrome",
+    "chromium",
+    "edge",
+    "extension",
+    "bun"
+  ],
+  "homepage": "https://github.com/Taiizor/browser-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/Taiizor/browser-mcp/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Taiizor/browser-mcp.git",
+    "directory": "mcp-server"
+  },
+  "license": "MIT",
   "type": "module",
   "bin": {
     "browser-mcp": "bin/browser-mcp.js"
   },
+  "files": [
+    "bin",
+    "src",
+    "!src/**/*.test.ts",
+    "bunfig.toml",
+    "README.md",
+    "LICENSE"
+  ],
   "engines": {
     "bun": ">=1.3.3"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "start": "bun run src/index.ts",
@@ -17,7 +50,9 @@
     "test:unit": "bun test ./test/unit ./src",
     "test:integration": "bun test ./test/integration",
     "build:binary": "bun scripts/build-binaries.ts",
-    "build:binaries": "bun scripts/build-binaries.ts --all"
+    "build:binaries": "bun scripts/build-binaries.ts --all",
+    "prepack": "bun scripts/pack-assets.ts copy",
+    "postpack": "bun scripts/pack-assets.ts clean"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
