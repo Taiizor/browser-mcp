@@ -26,7 +26,7 @@ screenshots, PDF, tab audio and raw CDP, with every action behind a switch in th
 - **DevTools power.** Network requests, HAR export, mocking and throttling, console capture, viewport /
   media / CPU emulation, Web Vitals, performance traces and network-idle waits.
 - **Cancellation.** Cancelling an MCP call stops the command in the browser (`page_wait`, `dom_type`, traces ...).
-- **You stay in control.** 21 permission categories with per-action switches and an audit log. The agent can
+- **You stay in control.** Access profiles (Read / Standard / Full), 21 permission categories with per-action switches, a command history and a Stop agent button. The agent can
   switch actions off, never on.
 - **Authenticated local bridge.** Loopback only, protocol v3: each extension install and the server prove a
   shared pairing key to each other on every connection; satellites and local scripts prove the per-run bridge
@@ -54,7 +54,7 @@ extension/  (Chromium MV3, 116+)
   │                   throttling, emulation, tracing), cancellation, session teardown
   ├── content.js    → DOM snapshot & refs, selectors, click/type/fill, page_wait, storage & IndexedDB
   ├── offscreen.js  → clipboard, tab audio recording
-  └── popup.js      → permission switches, audit log, port, pairing status (Re-pair / Forget pairing)
+  └── popup.js      → profiles, permission switches, live activity, history, Stop agent, settings menu
 ```
 
 ## Quick Start
@@ -138,8 +138,9 @@ Start the client with the browser open: on a fresh setup the first extension ins
 trusted and paired automatically, and the popup badge turns **Connected**. From then on the server and that
 install prove a shared pairing key to each other on every connection, so another install (a second browser
 or profile, a moved unpacked folder) is refused until you start the server once with `--pair` (or
-`BROWSER_MCP_PAIR=1`; add `--extension-id <id>` for an unpacked build with a new id). If the popup shows **Rejected**, **Action needed**, **Unverified server** or
-**Update needed**, follow [docs/pairing.md](docs/pairing.md).
+`BROWSER_MCP_PAIR=1`; add `--extension-id <id>` for an unpacked build with a new id). If the popup shows a
+problem notice such as **Pairing needed** or **Unknown server**, its **Details** link opens the fix in
+[docs/pairing.md](docs/pairing.md#popup-states).
 
 ## Documentation
 

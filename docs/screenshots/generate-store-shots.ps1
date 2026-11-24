@@ -4,11 +4,12 @@
 #   ./generate-store-shots.ps1
 #
 # Inputs (same folder):
-#   popup-permissions.png      360px-wide popup capture (Permissions tab)
-#   popup-recent-commands.png  360px-wide popup capture (Recent Commands tab)
+#   popup-permissions.png      popup capture, 360x550 CSS px at 2x (Permissions tab)
+#   popup-history.png          popup capture, 360x550 CSS px at 2x (History tab)
 # Outputs (same folder):
 #   store-1-permissions.png    1280x800 store screenshot
-#   store-2-auditlog.png       1280x800 store screenshot
+#   store-2-history.png        1280x800 store screenshot
+#   social-preview-1280x640.png GitHub social preview
 #
 # Requires: Windows PowerShell 5.1+ (uses System.Drawing).
 
@@ -57,7 +58,7 @@ function New-StoreShot($PopupFile, $Title, $Lines, $OutFile) {
           $g.DrawImage($icon, $x, 640, 64, 64)
         } finally { $icon.Dispose() }
         $bullet = [char]0x2022
-        $g.DrawString(('Local-first  ' + $bullet + '  114 MCP tools  ' + $bullet + '  MIT'), $fSmall, $gray, ($x + 80), 658)
+        $g.DrawString(('Local-first  ' + $bullet + '  122 MCP tools  ' + $bullet + '  MIT'), $fSmall, $gray, ($x + 80), 658)
       } finally {
         $fTitle.Dispose(); $fSub.Dispose(); $fBody.Dispose(); $fSmall.Dispose()
       }
@@ -78,18 +79,18 @@ function New-StoreShot($PopupFile, $Title, $Lines, $OutFile) {
 }
 
 New-StoreShot (Join-Path $Here 'popup-permissions.png') 'Full control.' @(
-  'Live connection status',
-  '18 permission categories',
-  'Master + per-tool toggles',
-  'Instant sync, no reload'
+  'Read, Standard and Full profiles',
+  '21 permission categories',
+  'High-risk access needs your OK',
+  'One click stops the agent'
 ) (Join-Path $Here 'store-1-permissions.png')
 
-New-StoreShot (Join-Path $Here 'popup-recent-commands.png') 'Full transparency.' @(
-  'Live audit log of AI commands',
-  'Durations and timestamps',
-  'Per-command status',
-  'One-click clear'
-) (Join-Path $Here 'store-2-auditlog.png')
+New-StoreShot (Join-Path $Here 'popup-history.png') 'Full transparency.' @(
+  'See the running command live',
+  'History grouped by site',
+  'Failed commands at a glance',
+  'Typed text is never stored'
+) (Join-Path $Here 'store-2-history.png')
 
 # GitHub social preview (1280x640, upload via repo Settings > Social preview)
 $SW = 1280; $SH = 640
@@ -113,7 +114,7 @@ try {
     try {
       $sg.DrawString('Browser MCP', $sfTitle, $swhite, 420, 190)
       $sg.DrawString('Full-authority browser bridge for AI assistants', $sfSub, $sgray, 424, 310)
-      $sg.DrawString('114 MCP tools  ' + [char]0x2022 + '  Chromium MV3  ' + [char]0x2022 + '  MIT', $sfSmall, $saccent, 424, 380)
+      $sg.DrawString('122 MCP tools  ' + [char]0x2022 + '  Chromium MV3  ' + [char]0x2022 + '  MIT', $sfSmall, $saccent, 424, 380)
     } finally {
       $sfTitle.Dispose(); $sfSub.Dispose(); $sfSmall.Dispose()
     }

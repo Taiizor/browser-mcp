@@ -88,10 +88,10 @@ Load `extension/` via `chrome://extensions` (Developer Mode → Load unpacked). 
 build has its own extension ID (it depends on the folder) and is its own install, so:
 
 - with a fresh config directory it pairs automatically on the first connection;
-- otherwise the popup shows **Rejected** (untrusted ID, `4003`) or **Pairing is closed**
-  (`4004`). Start the server once with `--extension-id <id> --pair` (the ID is shown in the
-  popup), then drop both flags: the ID is saved in `trusted-extensions.json` and the key in
-  `extension-keys.json`.
+- otherwise the popup shows **Extension not recognized** (`4003`) or **Pairing is closed**
+  (`4004`). Start the server once with `--extension-id <id> --pair` (**Copy ID** in the
+  notice copies the ID), then drop both flags: the ID is saved in `trusted-extensions.json`
+  and the key in `extension-keys.json`.
 
 See [docs/pairing.md](docs/pairing.md) for every popup state. Reloading the extension keeps
 its pairing. After changing server code, restart every browser-mcp process on the port
@@ -206,7 +206,8 @@ same pull request:
   user which side to update, instead of a silent failure;
 - keep the frame list and close codes in sync: the header comments of both files,
   `refusalText` in `bridge.ts`, `CLOSE_PAIR_STATES` and `SLOW_RETRY_CODES` in
-  `background.js`, `PAIR_STATES` and the notices in `popup.js`, and the tables in
+  `background.js`, `PAIR_STATES` and the notices in `popup.js` (each notice's **Details**
+  link opens its heading in docs/pairing.md), and the tables in
   [SECURITY.md](SECURITY.md), [docs/pairing.md](docs/pairing.md) and
   [docs/bridge-protocol.md](docs/bridge-protocol.md) (client authentication and the script
   example);

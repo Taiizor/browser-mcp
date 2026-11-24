@@ -23,7 +23,7 @@ list.
 | `--browser <name>`, `-b <name>`, `--browser=<name>`, `-b=<name>` | Browser for auto-launch: `chrome`, `edge`, `brave`, `opera` (or a path); overrides `BROWSER`. An empty value or one starting with `-` exits with code 2 (`Missing browser name for <flag> ...`) |
 | `--extension-id <id>`, `--extension-id=<id>` | Trust an extension id (repeatable, comma separated, `*` = any id); an invalid id exits with code 2 |
 | `--pair` | Open the pairing window for one new extension install, for 10 minutes after start ([pairing.md](pairing.md#adding-another-browser-or-install)) |
-| `--allow-legacy-extension` | Accept protocol-2 (older 0.3.x) extensions over an **unauthenticated** link; logs a warning ([pairing.md](pairing.md#version-mismatch)) |
+| `--allow-legacy-extension` | Accept protocol-2 (older 0.3.x) extensions over an **unauthenticated** link; logs a warning ([pairing.md](pairing.md#legacy-mode)) |
 | `--toolsets <list>`, `--toolsets=<list>` | Toolsets listed from the start: `core` (default), `all`, or category ids, comma separated; repeatable, lists are merged ([toolsets.md](toolsets.md)). An empty value or one starting with `-` exits with code 2 |
 | `-h`, `--help` | Print usage and exit |
 | `-v`, `--version` | Print the version and exit |
@@ -75,8 +75,8 @@ Server and extension must use the same port. Server precedence: `--port` → `BR
   (`netsh interface ipv4 show excludedportrange protocol=tcp`).
 - "Already in use" means another `browser-mcp` process owns the port: this process joins it as a satellite
   ([bridge-protocol.md](bridge-protocol.md)).
-- **Extension side:** type the port in the popup footer and click **Set** (or press Enter); **↺** resets it to
-  `8765`. The extension reconnects at once, without a reload.
+- **Extension side:** open the popup's **⋯** menu, type the port under **Bridge port** and click **Set** (or
+  press Enter); **↺** resets it to `8765`. The extension reconnects at once, without a reload.
 
 ## Project .env files
 

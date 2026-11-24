@@ -2,7 +2,7 @@
 
 Browser MCP has two parts that must come from the same release: the MCP server (`mcp-server/`), which your
 MCP client starts over stdio, and the browser extension (`extension/`), which connects to the server on
-`ws://127.0.0.1:8765`. Both speak bridge protocol 3 (see [pairing.md](pairing.md#version-mismatch)).
+`ws://127.0.0.1:8765`. Both speak bridge protocol 3 (see [pairing.md](pairing.md#versions-do-not-match)).
 
 - [Requirements](#requirements)
 - [Server: standalone binary](#option-a-standalone-binary)
@@ -151,8 +151,8 @@ An unpacked extension gets an id derived from its folder path. Loading it from a
 machine, gives a new id that the server has to trust and pair again: see
 [pairing.md](pairing.md#adding-another-browser-or-install).
 
-The extension connects to port 8765 by default. To use another port, set it in the popup footer and start the
-server with the same `--port` ([configuration](configuration.md#bridge-port)).
+The extension connects to port 8765 by default. To use another port, set it in the popup's **⋯** menu
+(**Bridge port**) and start the server with the same `--port` ([configuration](configuration.md#bridge-port)).
 
 ## Check the installation
 

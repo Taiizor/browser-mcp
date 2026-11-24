@@ -95,7 +95,15 @@ worker restarts):
 - up to 1,000 recent network entries, 1,000 console messages and 1,000 dialog events,
   cleared with `network_clear`, `console_clear` and `dialog_clear`; while a capture switch
   is off, nothing new of that kind is recorded and the matching read tool is blocked;
-- a command audit log (up to 50 entries) shown in the popup, cleared with **Clear**;
+- a command history (up to 50 entries) shown in the popup, cleared with **Clear**: for
+  each command the action, whether it succeeded (with the error text when it failed),
+  its duration and time, the tab ID, the hostname of the tab it acted on, and a short
+  summary such as the selector, the length of typed text or code, the number of files,
+  the target hostname or cookie domain, the name of a special key (such as `Enter`) or
+  a DevTools (CDP) method name. The summary never contains typed text, field values,
+  cookie or storage values, clipboard text, code, file paths, or URL paths and queries.
+  The error text is kept as the extension reported it and can quote a page URL, a value
+  the command was given or a JavaScript exception message;
 - tab audio recordings until your assistant collects them (unclaimed finished recordings
   are discarded after 30 minutes);
 - finished performance traces until the MCP server has read them, at most 5 minutes
@@ -103,10 +111,12 @@ worker restarts):
 
 In the extension's browser storage (web pages cannot read either store):
 
-- `chrome.storage.local`: the port, the permission switches, the popup language, and the
-  list of permission names the popup last showed (`mcpKnownActions`, used to keep new
-  permissions of a category you turned off switched off after an update). From Chromium 140
-  only the extension's own pages and background worker can read it; on older versions the
+- `chrome.storage.local`: the port, the permission switches, the popup language, the list
+  of permission names the popup last showed (`mcpKnownActions`, used to keep new
+  permissions of a category you turned off switched off after an update), and the names of
+  the permissions your assistant switched off itself (`mcpAgentDisabled`, action names
+  only, used for the popup's **Off by agent** badge). From Chromium 140 only the
+  extension's own pages and background worker can read it; on older versions the
   extension's content scripts technically can too, which is why the pairing key is not kept
   there;
 - the extension's own IndexedDB (database `browser-mcp`), which only the extension's pages

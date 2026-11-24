@@ -6,7 +6,7 @@ which most clients show as the MCP server log. The popup badge tells the extensi
 
 - [The client cannot start the server](#the-client-cannot-start-the-server)
 - [The popup says No server](#the-popup-says-no-server)
-- [The popup says Rejected, Action needed, Unverified server or Update needed](#the-popup-says-rejected-action-needed-unverified-server-or-update-needed)
+- [The popup says Pairing needed, Unknown server, Update needed or Rejected](#the-popup-says-pairing-needed-unknown-server-update-needed-or-rejected)
 - [Port problems](#port-problems)
 - [A tool is missing or "Tool ... is not enabled"](#a-tool-is-missing-or-tool--is-not-enabled)
 - ["Permission disabled in extension"](#permission-disabled-in-extension)
@@ -42,28 +42,30 @@ which most clients show as the MCP server log. The popup badge tells the extensi
 Nothing accepts connections on the popup's port.
 
 - The server runs only while an MCP client runs it: start the client (or a session in it) first.
-- Server and popup must use the same port (popup footer vs. `--port` / `BROWSER_MCP_PORT`; the generic `PORT` is
-  ignored on purpose). See [configuration.md](configuration.md#bridge-port).
+- Server and popup must use the same port (**Bridge port** in the popup's **⋯** menu vs. `--port` /
+  `BROWSER_MCP_PORT`; the generic `PORT` is ignored on purpose). See
+  [configuration.md](configuration.md#bridge-port).
 - The server's stderr shows `primary bridge on :<port>` or `joining as satellite client` once the bridge is up.
 
-## The popup says Rejected, Action needed, Unverified server or Update needed
+## The popup says Pairing needed, Unknown server, Update needed or Rejected
 
-The server or the extension refused the handshake. The popup explains which and what to do; every state and
-close code is in [pairing.md](pairing.md#popup-states). The most common cases:
+The server or the extension refused the handshake. The popup notice names the problem in one sentence, and its
+**Details** link opens the matching section of [pairing.md](pairing.md#popup-states), where every state and close
+code is explained. The most common cases:
 
-| Popup | Usual cause | Fix |
+| Popup notice | Usual cause | Fix |
 |---|---|---|
-| **Rejected** with an extension id and a Copy button (4003) | Unpacked build from a new folder: new id | Trust the id and pair once: [adding another install](pairing.md#adding-another-browser-or-install) |
-| **Rejected**, "Pairing is closed" (4004) | Second browser / profile / reinstall | Start the server once with `--pair` |
-| **Action needed** (4100) | You reset the server's config directory | Click **Re-pair** if you did that yourself |
-| **Rejected** "pairing proof" (4005) / **Unverified server** (4101) | Keys differ between the two sides, or (4101) a program that is not your server holds the port | **Forget pairing** + `--pair`, or delete `extension-keys.json` and Re-pair; first check what listens on the port |
-| **Update needed** (4002 / 4102) | Server and extension from different releases | Update the side the popup names |
+| **Extension not recognized** (4003) | Unpacked build from a new folder: new id | Click **Copy ID**, then trust the id and pair once: [adding another install](pairing.md#adding-another-browser-or-install) |
+| **Pairing is closed** (4004) | Second browser / profile / reinstall | Start the server once with `--pair` ([details](pairing.md#pairing-is-closed)) |
+| **Pairing needed** (4100) | You reset the server's config directory | Click **Re-pair** if you did that yourself ([details](pairing.md#pairing-needed)) |
+| **Pairing needed** (4005) / **Unknown server** (4101) | Keys differ between the two sides, or (4101) a program that is not your server holds the port | **Forget pairing** + `--pair`, or delete `extension-keys.json` and Re-pair; first check what listens on the port ([details](pairing.md#unknown-server)) |
+| **Versions do not match** (4002 / 4102) | Server and extension from different releases | Update the side the popup names ([details](pairing.md#versions-do-not-match)) |
 
 ## Port problems
 
 - **`EACCES`** or "binding the port failed although nothing accepts connections": on Windows the port may lie in
   an excluded range (`netsh interface ipv4 show excludedportrange protocol=tcp`). Choose another port with
-  `--port` and set the same one in the popup footer.
+  `--port` and set the same one in the popup's **⋯** menu (**Bridge port**).
 - **The port belongs to something else** (another program answering on 8765): the server cannot become primary
   or join it. Pick another port on both sides.
 - **Several clients:** only the first process owns the port; the others are satellites. That is expected

@@ -4,8 +4,8 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.3.x   | :white_check_mark: |
-| < 0.3   | :x:                |
+| 0.4.x   | :white_check_mark: |
+| < 0.4   | :x:                |
 
 Only the latest minor release receives security fixes.
 
@@ -251,14 +251,14 @@ Further rules:
 | ---- | ------ | ------- | ------- | ----------- |
 | `4001` | `auth-required` | server | Origin-less client that did not prove the bridge token (or sent a wrong legacy token) | - |
 | `4002` | `protocol-mismatch:server=3,ext=<n>` | server | the extension speaks another protocol (`<n>` is `none` when missing) | Update needed |
-| `4003` | `untrusted-extension:<id>` | server | extension id not trusted and trust on first use closed | Rejected |
-| `4004` | `pairing-closed` | server | no key for this install and the pairing window is closed | Rejected (Pairing is closed) |
-| `4005` | `auth-failed` | server | the extension's proof did not match the stored key | Rejected |
+| `4003` | `untrusted-extension:<id>` | server | extension id not trusted and trust on first use closed | Rejected (Extension not recognized) |
+| `4004` | `pairing-closed` | server | no key for this install and the pairing window is closed | Pairing needed (Pairing is closed) |
+| `4005` | `auth-failed` | server | the extension's proof did not match the stored key | Pairing needed (Forget pairing) |
 | `4006` | `replaced` | server | the same install completed a newer handshake | - |
-| `4008` | `handshake-timeout` | server | handshake not finished within 5 s | Rejected (code shown) |
+| `4008` | `handshake-timeout` | server | handshake not finished within 5 s | Disconnected (Connection closed) |
 | `1008` | `bad-hello` | server | malformed v3 `hello` (install id or nonce) | No server |
-| `4100` | `pair-declined` | extension | pairing offer while the extension holds a key and no **Re-pair** was clicked | Action needed (Re-pair) |
-| `4101` | `server-auth-failed` | extension | wrong or missing server proof (also one bound to another port), malformed frame, second challenge/pair, or `welcome` before the proof | Unverified server |
+| `4100` | `pair-declined` | extension | pairing offer while the extension holds a key and no **Re-pair** was clicked | Pairing needed (Re-pair) |
+| `4101` | `server-auth-failed` | extension | wrong or missing server proof (also one bound to another port), malformed frame, second challenge/pair, or `welcome` before the proof | Unknown server |
 | `4102` | `server-outdated` | extension | `welcome` without a completed v3 handshake (a 0.3.x server) | Update needed |
 
 After `4001`-`4005` and `4100`-`4102` the extension retries every 30 s;
@@ -318,14 +318,37 @@ remedy of each state, see [docs/pairing.md](docs/pairing.md).
 - **The agent can only restrict itself.** Over the bridge, `perm_set` can disable
   permissions but never re-enable them; turning a switch back on is only
   possible in the popup. The background worker answers popup operations
-  (`mcp-status`, `mcp-perms-set`, `mcp-repair`, `mcp-forget-pairing`, ...) only
-  for the extension's own pages, never for content scripts or web pages. While
-  it runs, it reverts any `chrome.storage.local` write that would turn a switch
-  back on. `chrome.storage.local` (switches, port) is set to
+  (`mcp-status`, `mcp-perms-set`, `mcp-stop-all`, `mcp-repair`,
+  `mcp-forget-pairing`, ...) only for the extension's own pages, never for
+  content scripts or web pages. While it runs, it reverts any
+  `chrome.storage.local` write that would turn a switch back on.
+  `chrome.storage.local` (switches, port) is set to
   `TRUSTED_CONTEXTS`, which Chromium honours only from version 140; on 116-139
   content scripts can still read and write it, so nothing read from it is
   trusted blindly: switches only tighten, a stored port is applied only at
   start-up, and the pairing key lives in IndexedDB instead.
+- **Stop agent is popup-only.** The popup's **Stop agent** button sends
+  `mcp-stop-all`, which disables every action in the catalog (debugger
+  sessions are torn down as with any switch turned off) and aborts every
+  running command (they answer `cancelled`). Like every popup operation it is
+  accepted only from the extension's own pages; neither the bridge nor a
+  content script or web page can send it.
+- **"Off by agent" is informational.** Actions the agent disabled with
+  `perm_set` are remembered so the popup can mark them, in memory and in
+  `chrome.storage.local` under `mcpAgentDisabled` (action names only, checked
+  against the catalog when loaded). The marker is shown only on switches that
+  are off, and it cannot re-enable anything. The in-memory set is
+  authoritative: writes to the key from elsewhere are ignored, and the
+  background worker immediately rewrites the key with its in-memory set. A
+  popup change to an action removes its marker, and
+  `mcp-stop-all` clears them all.
+- **High-risk categories need a confirmation.** When a popup change (a
+  profile, a category switch or a single switch) would enable a disabled action
+  of a high-risk category (Power, Cookies, Storage, Sessions & State,
+  Clipboard, Browsing Data, System), the popup first asks the user to confirm
+  and names the categories; cancelling leaves the switches unchanged.
+  Disabling never asks. This guards against slips in the popup; the switches
+  in the background worker remain the enforcement point.
 - The MCP server hides tools whose actions are switched off, but the extension
   is the enforcement point.
 
