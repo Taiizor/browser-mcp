@@ -8,7 +8,7 @@ below use the **source install** launch command; for the other install options r
 |---|---|---|
 | Source (clone) | `bun` | `["--config=<repo>/mcp-server/bunfig.toml", "--no-env-file", "run", "<repo>/mcp-server/src/index.ts"]` |
 | Standalone binary | `<path>/browser-mcp-windows-x64.exe` (or `dist/browser-mcp`, `browser-mcp-linux-x64` ...) | `[]` |
-| bunx (after the first npm release) | `bunx` | `["@taiizor/browser-mcp@0.3.5"]` |
+| bunx (after the first npm release) | `bunx` | `["@taiizor/browser-mcp@0.4.0"]` |
 
 - `<repo>` is the **absolute** path of your clone. On Windows write forward slashes
   (`C:/src/browser-mcp`) or escaped backslashes in JSON.
@@ -63,7 +63,7 @@ or by hand:
 
 `environment` is optional; omit it to use the default port `8765`. OpenCode takes the whole command line as one
 array, so with the binary use `"command": ["<path>/browser-mcp-windows-x64.exe"]` and with bunx
-`"command": ["bunx", "@taiizor/browser-mcp@0.3.5"]`. Verify with `opencode mcp list` (it should show
+`"command": ["bunx", "@taiizor/browser-mcp@0.4.0"]`. Verify with `opencode mcp list` (it should show
 `browser connected`). OpenCode v1 nests servers directly under `mcp`, without the `servers` key.
 
 ## Claude Code
@@ -77,7 +77,7 @@ claude mcp add browser -- bun --config=<repo>/mcp-server/bunfig.toml --no-env-fi
 Everything after `--` is the server command. Add `--scope project` (before `browser`) to write to `.mcp.json`
 instead of the default local scope, or `--scope user` for every project. Binary:
 `claude mcp add browser -- <path>/browser-mcp-windows-x64.exe`; bunx:
-`claude mcp add browser -- bunx @taiizor/browser-mcp@0.3.5`.
+`claude mcp add browser -- bunx @taiizor/browser-mcp@0.4.0`.
 
 Or in `.mcp.json`:
 

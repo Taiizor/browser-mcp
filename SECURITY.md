@@ -513,7 +513,7 @@ token and the pairing keys. Mitigations:
   reads neither `bunfig.toml` nor `.env` from the working directory and needs no
   Bun at run time. Building it needs Bun >= 1.3.7 (binaries from older Bun
   releases still run a project preload).
-- **bunx caveat:** always pin the version (`bunx @taiizor/browser-mcp@0.3.5`).
+- **bunx caveat:** always pin the version (`bunx @taiizor/browser-mcp@0.4.0`).
   An unversioned `bunx <name>` first runs `node_modules/.bin/<name>` from the
   working directory, which a project can plant. Never run `bunx
   browser-mcp-server`: that name belongs to an unrelated package. bunx accepts
@@ -523,7 +523,7 @@ token and the pairing keys. Mitigations:
   `bunfig.toml`, `--no-env-file` and a cleaned environment, so the server
   process is clean, but a project preload has already run once as you. For
   untrusted projects use the standalone binary or
-  `bunx --cwd=<absolute trusted folder> @taiizor/browser-mcp@0.3.5` (the server's
+  `bunx --cwd=<absolute trusted folder> @taiizor/browser-mcp@0.4.0` (the server's
   working directory, one of the default upload folders, then becomes that folder).
 - **Warning:** when Bun applied a project `bunfig.toml`, the server logs
   `[browser-mcp] warning: Bun applied <cwd>/bunfig.toml to this process ...`
