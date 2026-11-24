@@ -44,7 +44,7 @@ more with `browser_toolsets`, or you choose them at start-up with `--toolsets` (
 
 <!-- BEGIN GENERATED: tool reference (do not edit by hand) -->
 
-Generated from the server's own `tools/list` (browser-mcp 0.4.0, every toolset enabled): **122 tools** in 22 toolsets, 28 of them in the default `core` toolset (marked **core**). Meta tools are always listed.
+Generated from the server's own `tools/list` (browser-mcp 0.4.1, every toolset enabled): **122 tools** in 22 toolsets, 28 of them in the default `core` toolset (marked **core**). Meta tools are always listed.
 
 | Toolset | Tools | In core | Description |
 |---|---:|---:|---|

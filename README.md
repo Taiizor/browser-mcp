@@ -74,12 +74,12 @@ cd browser-mcp/mcp-server && bun install && bun run build:binary   # -> dist/bro
 **B. bunx** (after the first npm release of `@taiizor/browser-mcp`). Always pin the version:
 
 ```sh
-bunx @taiizor/browser-mcp@0.4.0
+bunx @taiizor/browser-mcp@0.4.1
 ```
 
 bunx itself still applies the current project's `bunfig.toml` and `.env` to its short-lived launcher process
 (the server process is started clean). In untrusted projects use the binary, or
-`bunx --cwd=<trusted folder> @taiizor/browser-mcp@0.4.0`.
+`bunx --cwd=<trusted folder> @taiizor/browser-mcp@0.4.1`.
 
 **C. From source** (`bun install` needs Bun >= 1.4.0, which reads `bun.lock`; the server then runs on Bun >= 1.3.3):
 
@@ -123,7 +123,7 @@ Most clients take an `mcpServers` entry (per-client files and formats: [docs/cli
 ```
 
 With the binary use `"command": "<path>/browser-mcp(.exe)", "args": []`; with bunx use
-`"command": "bunx", "args": ["@taiizor/browser-mcp@0.4.0"]`. Claude Code in one line:
+`"command": "bunx", "args": ["@taiizor/browser-mcp@0.4.1"]`. Claude Code in one line:
 
 ```sh
 claude mcp add browser -- bun --config=<repo>/mcp-server/bunfig.toml --no-env-file run <repo>/mcp-server/src/index.ts

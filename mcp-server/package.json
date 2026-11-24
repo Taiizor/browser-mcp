@@ -1,6 +1,6 @@
 {
   "name": "@taiizor/browser-mcp",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Chromium extension bridge MCP server - full browser automation (tabs, DOM, network, console)",
   "keywords": [
     "mcp",

@@ -65,13 +65,13 @@ The npm package is `@taiizor/browser-mcp` (command `browser-mcp`). These instruc
 published to npm.
 
 ```sh
-bunx @taiizor/browser-mcp@0.4.0
+bunx @taiizor/browser-mcp@0.4.1
 ```
 
-Client entry: `{"command": "bunx", "args": ["@taiizor/browser-mcp@0.4.0"]}`, or
-`claude mcp add browser -- bunx @taiizor/browser-mcp@0.4.0`.
+Client entry: `{"command": "bunx", "args": ["@taiizor/browser-mcp@0.4.1"]}`, or
+`claude mcp add browser -- bunx @taiizor/browser-mcp@0.4.1`.
 
-- **Always pin the version** (`@taiizor/browser-mcp@0.4.0`, not `@taiizor/browser-mcp`). An unversioned `bunx <name>` first runs
+- **Always pin the version** (`@taiizor/browser-mcp@0.4.1`, not `@taiizor/browser-mcp`). An unversioned `bunx <name>` first runs
   `node_modules/.bin/<name>` of the current folder, which a repository can plant; a versioned spec does not.
 - **Use the scoped name.** The unscoped `browser-mcp-server` and `browser-mcp` on npm are different packages,
   not this project.
@@ -80,9 +80,9 @@ Client entry: `{"command": "bunx", "args": ["@taiizor/browser-mcp@0.4.0"]}`, or
   The launcher then starts the server as a child with the package's own `bunfig.toml`, `--no-env-file` and a
   cleaned environment, so the server process itself is clean, and it warns on stderr when it saw a project
   `bunfig.toml`. For untrusted projects use the binary, or run bunx from a folder you trust:
-  `bunx --cwd=<absolute trusted folder> @taiizor/browser-mcp@0.4.0`. With `--cwd` the server's working
+  `bunx --cwd=<absolute trusted folder> @taiizor/browser-mcp@0.4.1`. With `--cwd` the server's working
   directory becomes that folder, which is also one of the default [upload folders](configuration.md#upload-folders-dom_upload).
-- Global install: `bun add -g @taiizor/browser-mcp@0.4.0` puts a `browser-mcp` command on `PATH` that
+- Global install: `bun add -g @taiizor/browser-mcp@0.4.1` puts a `browser-mcp` command on `PATH` that
   behaves like the bunx launcher.
 
 ### Option C: from source
@@ -161,7 +161,7 @@ The extension connects to port 8765 by default. To use another port, set it in t
 <launch command> --help      # lists the command-line options
 ```
 
-where `<launch command>` is the binary, `bunx @taiizor/browser-mcp@0.4.0`, or the `bun --config=... run ...`
+where `<launch command>` is the binary, `bunx @taiizor/browser-mcp@0.4.1`, or the `bun --config=... run ...`
 command above. Both exit at once without touching the bridge port. Inside the agent, `browser_status` reports
 the connection, mode (primary or satellite), pairing state and both versions.
 
