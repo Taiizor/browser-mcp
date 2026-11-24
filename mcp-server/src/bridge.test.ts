@@ -288,7 +288,13 @@ async function startFakeServer(onConnection: (client: WebSocket, n: number) => v
     () =>
       new Promise<void>((resolve) => {
         for (const c of wss.clients) c.terminate();
-        wss.close(() => resolve());
+        // Bun 1.3 can keep a terminated client that was already closing, and close() then
+        // never calls back: do not let that hang the cleanup.
+        const timer = setTimeout(resolve, 1000);
+        wss.close(() => {
+          clearTimeout(timer);
+          resolve();
+        });
       })
   );
   await new Promise<void>((resolve, reject) => {

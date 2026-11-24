@@ -2636,8 +2636,9 @@ export class BridgeClient implements IBridge {
     });
     ws.on("error", (e) => {
       this.log(`satellite ws error: ${errText(e)}`);
-      try { ws.terminate(); } catch {}
+      // (dropLink first, for the same reason as in failAuth)
       this.dropLink(ws, e as Error);
+      try { ws.terminate(); } catch {}
     });
   }
 
@@ -2726,8 +2727,10 @@ export class BridgeClient implements IBridge {
       `WARNING: satellite not linked: ${why}; it was sent no token and no command (${hint}). Retrying with backoff.`,
       60000
     );
-    try { ws.terminate(); } catch {}
+    // Drop the link before terminate(): Bun 1.3 emits "close" synchronously from terminate(),
+    // and that handler would record a bare "closed" error in place of this one.
     this.dropLink(ws, new Error(`Primary bridge on :${this.port} failed authentication: ${why}`), true);
+    try { ws.terminate(); } catch {}
   }
 
   /** Events broadcast by the primary (A9). */
