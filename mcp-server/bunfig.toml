@@ -1,0 +1,11 @@
+# Trusted Bun config for browser-mcp. It is deliberately empty.
+#
+# MCP clients start the server inside whatever project the agent works on, and Bun reads
+# $cwd/bunfig.toml (preload, define, ...) into every process it starts there. Naming this file
+# explicitly makes Bun read it instead:
+#
+#   bun --config=<repo>/mcp-server/bunfig.toml --no-env-file run <repo>/mcp-server/src/index.ts
+#
+# Only the "--config=<path>" form works (Bun 1.4): "--config <path>", "-c <path>" and "-c=<path>"
+# still read the project's file (its preload runs). bin/browser-mcp.js starts the server this way.
+# Anything added here runs inside the server, so keep preload and define out of it.
