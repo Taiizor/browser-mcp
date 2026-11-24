@@ -1,13 +1,15 @@
 // Background service worker: WS bridge + chrome.* API router.
 // WS: ws://127.0.0.1:<port>  (default 8765, configurable in storage/popup)
 
-const PROTOCOL_VERSION = 2;
+// 3 = mutual HMAC authentication with a per-install key (see "pairing" below).
+const PROTOCOL_VERSION = 3;
 let currentPort = 8765;
 let portLoaded = false;
 let ws = null;
 let reconnectMs = 1000;
 let reconnectTimer = null;
-// True once the server answered our `hello` with `welcome` on the current socket.
+// True once the server completed the v3 handshake on the current socket and
+// sent `welcome`: commands, events and page hooks need it.
 let paired = false;
 // Last WebSocket close { code, reason, at } (e.g. 4003 untrusted extension id,
 // 4001 auth required), surfaced in the popup through mcp-status.
@@ -34,15 +36,30 @@ const emulationSessions = new Map();
 // tabId -> params / headers. Cleared together with the debugger holders.
 const throttleSessions = new Map();
 const headerSessions = new Map();
+// emulation_viewport / emulation_media / emulation_cpu: tabId -> the applied
+// override. They share the persistent "emulation" holder with geolocation.
+const viewportSessions = new Map();
+const mediaSessions = new Map();
+const cpuSessions = new Map();
+// Running CDP traces (perf_trace_start, persistent "perf" holder):
+// tabId -> { startedAt, categories, collector (set while perf_trace_stop collects) }
+const traceSessions = new Map();
 let routeSeq = 0;
 // Dialog policy applied by the MAIN-world dialog hook on agent tabs.
 const dialogPolicy = { accept: true, promptText: "", blockUnload: false };
 // Sticky frame (frame_focus): tabId -> { frameId, url }
 const stickyFrames = new Map();
-// Tabs under automation: targeted by a command (explicit tabId or active-tab
-// fallback) or created by tab_create / window_create. Console + dialog hooks
-// are installed only here. Persisted in chrome.storage.session.
+// Tabs under automation: created by tab_create / tab_duplicate / window_create
+// or targeted with an explicit tabId. Console + dialog hooks are installed only
+// here. Persisted in chrome.storage.session.
 const agentTabs = new Set();
+// Tabs reached only through the active-tab fallback (no tabId): tabId -> the
+// origin they showed then. Console hook only, never the dialog hook; see
+// activeTabId() for the rule. Persisted with agentTabs.
+const fallbackTabs = new Map();
+// Last time a command that may navigate touched a tab (explicit tabId or
+// fallback): tabId -> ms. Tells agent-caused navigations from the user's own.
+const tabTouch = new Map();
 
 function wildcardMatch(pattern, url) {
   const rx = "^" + String(pattern).split("*").map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*") + "$";
@@ -75,6 +92,12 @@ function bridgeOpen() {
   return !!ws && ws.readyState === WebSocket.OPEN;
 }
 
+// Open AND authenticated (v3 handshake done): events are streamed, page hooks
+// installed and network / spy data captured only then.
+function bridgePaired() {
+  return paired && bridgeOpen();
+}
+
 // Event frames stay well below ~1 MiB even with 3-byte UTF-8 characters.
 const MAX_EVENT_CHARS = 340000;
 
@@ -97,10 +120,10 @@ function sendWs(obj, maxChars) {
 }
 
 // Event gating: nothing is captured (or streamed) while the matching
-// permission is disabled; network capture also needs a connected bridge.
+// permission is disabled; network capture also needs a paired bridge.
 function eventAllowed(kind) {
   if (!permsLoaded) return false;
-  if (kind === "network") return bridgeOpen() && isAllowed("network_requests");
+  if (kind === "network") return bridgePaired() && isAllowed("network_requests");
   if (kind === "console") return isAllowed("console_get");
   if (kind === "dialog") return isAllowed("dialog_get");
   return true;
@@ -120,10 +143,12 @@ function sendEvent(kind, data) {
       }
     }
   }
-  sendWs({ type: "event", kind, data }, MAX_EVENT_CHARS);
+  // Never streamed to a socket that has not completed the handshake.
+  if (paired) sendWs({ type: "event", kind, data }, MAX_EVENT_CHARS);
 }
 
 function sendPermsEvent() {
+  if (!paired) return;
   sendWs({ type: "event", kind: "perms", data: { disabled: Array.from(disabledActions) } });
 }
 
@@ -151,12 +176,244 @@ function detectBrowser() {
 
 function dropSocket(sock) {
   if (!sock) return;
+  abortSocketCommands(sock);
   sock.onopen = null;
   sock.onmessage = null;
   sock.onclose = null;
   sock.onerror = null;
   try {
     sock.close();
+  } catch {}
+}
+
+// ---------- pairing (protocol 3) ----------
+// Per extension install: installId (crypto.randomUUID(), kept for the life of
+// the install, also when the key is replaced) and a 32-byte key K (64
+// lowercase hex) handed out once by the server in a "pair" frame. Both live
+// in the extension origin's IndexedDB (database "browser-mcp", object store
+// "pairing", record "current"), which content scripts, running in the page's
+// origin, can never open. (chrome.storage.local is not used for them: its
+// TRUSTED_CONTEXTS access level needs Chromium 140+, and older versions let
+// content scripts read and write it.) K never leaves the worker except inside
+// HMAC proofs. port = the TCP port this socket dialed (decimal), so a server
+// on another port cannot relay its challenge to us:
+//   serverProof = HMAC-SHA256(K, "browser-mcp/v3|server|"    + extId + "|" + installId + "|" + port + "|" + Ne + "|" + Ns)
+//   extProof    = HMAC-SHA256(K, "browser-mcp/v3|extension|" + extId + "|" + installId + "|" + port + "|" + Ns + "|" + Ne)
+// Per socket: hello {installId, nonce: Ne, hasKey} ->
+//   challenge {nonce: Ns, proof}: the server proves it holds K; we answer
+//     auth {proof: extProof}. No stored key / wrong proof: close 4101.
+//   pair {nonce: Ns, key}: accepted only without a stored key (first use) or
+//     within 2 min of the popup's Re-pair; the key is stored first, then
+//     pair_accept {proof: extProof}. Otherwise close 4100 (Re-pair offered).
+// -> welcome {protocol, pid, serverVersion}: paired; commands run from now on.
+// A welcome before that (an old v2 server, or one skipping the proof) is
+// closed with 4102 and nothing runs. Every frame with an id + action is
+// ignored until the socket is paired, so a process squatting on the port gets
+// neither command execution nor events.
+const HEX64_RE = /^[0-9a-f]{64}$/;
+const INSTALL_ID_RE = /^[A-Za-z0-9-]{8,64}$/;
+const ACCEPT_PAIR_MS = 120000;
+const SLOW_RETRY_MS = 30000;
+// Explicit rejections (either side) retry only every 30 s.
+const SLOW_RETRY_CODES = new Set([4001, 4002, 4003, 4004, 4005, 4100, 4101, 4102]);
+// Close code -> pairState shown in the popup (any other close: "none").
+const CLOSE_PAIR_STATES = {
+  4002: "protocol-mismatch",
+  4004: "pairing-closed",
+  4005: "auth-failed",
+  4100: "repair-offered",
+  4101: "server-auth-failed",
+  4102: "protocol-mismatch",
+};
+// Problem states: kept across the slow retries (see sock.onopen).
+const PAIR_PROBLEM_STATES = new Set(Object.values(CLOSE_PAIR_STATES));
+
+let pairing = { installId: "", key: null };
+// "none" | "handshake" | "paired" | "repair-offered" | "pairing-closed" |
+// "server-auth-failed" | "auth-failed" | "protocol-mismatch"
+let pairState = "none";
+// From the last welcome / protocol-mismatch close (reset for every new socket).
+let serverInfo = { version: null, protocol: null, pid: null };
+// Re-pair clicked in the popup: a "pair" offer is accepted until this time
+// (ms; mirrored in storage.session so a worker restart keeps it).
+let acceptPairUntil = 0;
+// socket -> { nonce: Ne, phase, port }: phase "hello" (not sent yet) ->
+// "await" (waiting for challenge / pair) -> "verifying" (HMAC / key storage in
+// progress) -> "verified" (waiting for welcome) -> "paired"; "closed" once
+// rejected. port: the port this socket dialed (setPort may change currentPort
+// while a handshake is still running).
+const sockHs = new WeakMap();
+
+function bytesToHex(u8) {
+  let s = "";
+  for (const b of u8) s += (b < 16 ? "0" : "") + b.toString(16);
+  return s;
+}
+
+function hexToBytes(hex) {
+  const out = new Uint8Array(hex.length >> 1);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  return out;
+}
+
+function randomHex32() {
+  const b = new Uint8Array(32);
+  crypto.getRandomValues(b);
+  return bytesToHex(b);
+}
+
+async function hmacHex(keyHex, message) {
+  const key = await crypto.subtle.importKey("raw", hexToBytes(keyHex), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(message));
+  return bytesToHex(new Uint8Array(sig));
+}
+
+// Constant-time comparison: no early exit on the first differing character.
+function hexEqual(a, b) {
+  if (typeof a !== "string" || typeof b !== "string") return false;
+  const n = Math.max(a.length, b.length);
+  let diff = a.length ^ b.length;
+  for (let i = 0; i < n; i++) diff |= (i < a.length ? a.charCodeAt(i) : 0) ^ (i < b.length ? b.charCodeAt(i) : 0);
+  return diff === 0;
+}
+
+// The pairing record in IndexedDB (see above).
+const PAIRING_DB = "browser-mcp";
+const PAIRING_STORE = "pairing";
+const PAIRING_RECORD = "current";
+// Where builds before the move kept it: migrated once, then removed.
+const LEGACY_PAIRING_KEY = "mcpPairing";
+let pairingDbPromise = null;
+
+function pairingDb() {
+  if (!pairingDbPromise) {
+    const p = new Promise((resolve, reject) => {
+      if (typeof indexedDB === "undefined" || !indexedDB) throw new Error("IndexedDB is not available");
+      const req = indexedDB.open(PAIRING_DB, 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(PAIRING_STORE)) db.createObjectStore(PAIRING_STORE);
+      };
+      req.onsuccess = () => {
+        const db = req.result;
+        // Closed under us (a version change, the browser clearing site data):
+        // the next access opens it again.
+        db.onversionchange = () => {
+          db.close();
+          if (pairingDbPromise === p) pairingDbPromise = null;
+        };
+        db.onclose = () => {
+          if (pairingDbPromise === p) pairingDbPromise = null;
+        };
+        resolve(db);
+      };
+      req.onerror = () => reject(req.error || new Error("IndexedDB open failed"));
+    });
+    p.catch(() => {
+      if (pairingDbPromise === p) pairingDbPromise = null;
+    });
+    pairingDbPromise = p;
+  }
+  return pairingDbPromise;
+}
+
+// One request in its own transaction; resolves the request's result once the
+// transaction has committed.
+async function pairingTx(mode, makeRequest) {
+  const db = await pairingDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(PAIRING_STORE, mode);
+    const req = makeRequest(tx.objectStore(PAIRING_STORE));
+    let result;
+    req.onsuccess = () => {
+      result = req.result;
+    };
+    tx.oncomplete = () => resolve(result);
+    tx.onerror = () => reject(tx.error || req.error || new Error("IndexedDB request failed"));
+    tx.onabort = () => reject(tx.error || new Error("IndexedDB transaction aborted"));
+  });
+}
+
+// { installId, key } from a stored record; "" / null for what is missing or malformed.
+function pairingFrom(p) {
+  let installId = "";
+  let key = null;
+  if (p && typeof p === "object") {
+    if (typeof p.installId === "string" && INSTALL_ID_RE.test(p.installId)) installId = p.installId;
+    if (installId && typeof p.key === "string" && HEX64_RE.test(p.key)) key = p.key;
+  }
+  return { installId, key };
+}
+
+const pairingReady = (async () => {
+  let legacy;
+  try {
+    const got = await chrome.storage.local.get(LEGACY_PAIRING_KEY);
+    legacy = got ? got[LEGACY_PAIRING_KEY] : undefined;
+  } catch {}
+  let record;
+  let dbOk = true;
+  try {
+    record = await pairingTx("readonly", (s) => s.get(PAIRING_RECORD));
+  } catch (e) {
+    // Never fall back to storage.local: content scripts may have written it.
+    // This worker runs unpaired (a pair offer is declined: the key cannot be
+    // stored) and the legacy record stays for the next start to migrate.
+    dbOk = false;
+    console.warn(`[mcp] pairing store (IndexedDB) unavailable: ${(e && e.message) || e}`);
+  }
+  let next = pairingFrom(record);
+  let write = false;
+  if (dbOk && record === undefined && legacy !== undefined) {
+    // First start after the move: the storage.local record becomes the
+    // IndexedDB record. (Only while IndexedDB holds no record at all: later,
+    // a storage.local value is never trusted.)
+    next = pairingFrom(legacy);
+    write = !!next.installId;
+  }
+  if (!next.installId) {
+    next = { installId: crypto.randomUUID(), key: null };
+    write = true;
+  }
+  pairing = next;
+  let saved = !write;
+  if (write && dbOk) {
+    try {
+      await savePairing();
+      saved = true;
+    } catch {}
+  }
+  // The copy is committed (or IndexedDB already had the record): drop the old one.
+  if (dbOk && saved && legacy !== undefined) {
+    try {
+      await chrome.storage.local.remove(LEGACY_PAIRING_KEY);
+    } catch {}
+  }
+  try {
+    const s = await chrome.storage.session.get("mcpAcceptPairUntil");
+    const until = Number(s && s.mcpAcceptPairUntil);
+    if (Number.isFinite(until) && until > Date.now()) acceptPairUntil = Math.min(until, Date.now() + ACCEPT_PAIR_MS);
+  } catch {}
+})();
+
+async function savePairing() {
+  const record = pairing.key ? { installId: pairing.installId, key: pairing.key } : { installId: pairing.installId };
+  await pairingTx("readwrite", (s) => s.put(record, PAIRING_RECORD));
+}
+
+function setAcceptPairUntil(until) {
+  acceptPairUntil = until;
+  try {
+    Promise.resolve(
+      until ? chrome.storage.session.set({ mcpAcceptPairUntil: until }) : chrome.storage.session.remove("mcpAcceptPairUntil")
+    ).catch(() => {});
+  } catch {}
+}
+
+function sendOn(sock, obj) {
+  if (sock.readyState !== WebSocket.OPEN) return;
+  try {
+    sock.send(JSON.stringify(obj));
   } catch {}
 }
 
@@ -178,23 +435,31 @@ function connect() {
     dropSocket(ws);
     ws = null;
     paired = false;
+    pairState = "none";
     onBridgeDown();
   }
   let sock;
+  // Bound into the handshake proofs (see pairing above).
+  const dialPort = currentPort;
   try {
-    sock = new WebSocket(`ws://127.0.0.1:${currentPort}`);
+    sock = new WebSocket(`ws://127.0.0.1:${dialPort}`);
   } catch {
     schedule();
     return;
   }
   ws = sock;
   paired = false;
+  sockHs.set(sock, { nonce: randomHex32(), phase: "hello", port: dialPort });
   sock.onopen = () => {
     if (ws !== sock) return;
     reconnectMs = 1000;
+    // A problem state (pairing-closed, repair-offered, ...) stays visible
+    // while the slow retry dials again: only welcome ("paired") or the next
+    // close replaces it, and user actions (reconnectNow / setPort) reset it.
+    if (!PAIR_PROBLEM_STATES.has(pairState)) pairState = "handshake";
+    serverInfo = { version: null, protocol: null, pid: null };
     console.log(`[mcp] bridge connected on port ${currentPort}`);
     sendHello(sock);
-    onBridgeUp();
   };
   sock.onmessage = (ev) => {
     if (ws !== sock) return;
@@ -204,11 +469,15 @@ function connect() {
     if (ws !== sock) return;
     ws = null;
     paired = false;
+    abortSocketCommands(sock);
     lastClose = { code: Number(ev && ev.code) || 0, reason: capStr(ev && ev.reason, 200), at: Date.now() };
+    pairState = CLOSE_PAIR_STATES[lastClose.code] || "none";
+    if (lastClose.code === 4002) {
+      const m = /server=(\d+)/.exec(lastClose.reason);
+      if (m) serverInfo = Object.assign({}, serverInfo, { protocol: Number(m[1]) });
+    }
     onBridgeDown();
-    // Explicit rejections (auth / untrusted extension id) retry slowly.
-    const rejected = lastClose.code === 4001 || lastClose.code === 4003;
-    schedule(rejected ? 30000 : undefined);
+    schedule(SLOW_RETRY_CODES.has(lastClose.code) ? SLOW_RETRY_MS : undefined);
   };
   sock.onerror = () => {
     try {
@@ -217,24 +486,133 @@ function connect() {
   };
 }
 
+// Drops the current socket (if any) and dials again at once (Re-pair, forget
+// pairing): a waiting server answers the new hello immediately.
+function reconnectNow() {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  if (ws) {
+    dropSocket(ws);
+    ws = null;
+    paired = false;
+    onBridgeDown();
+  }
+  pairState = "none";
+  reconnectMs = 1000;
+  connect();
+}
+
+// Extension-initiated close of a server that failed the handshake (4100
+// pair-declined, 4101 server-auth-failed, 4102 server-outdated): nothing runs
+// on this socket and the next attempt comes in 30 s.
+function rejectServer(sock, code, reason, state) {
+  const hs = sockHs.get(sock);
+  if (hs) hs.phase = "closed";
+  if (ws !== sock) return;
+  ws = null;
+  paired = false;
+  pairState = state;
+  lastClose = { code, reason, at: Date.now() };
+  console.warn(`[mcp] bridge rejected: ${code} ${reason}`);
+  dropSocketWith(sock, code, reason);
+  onBridgeDown();
+  schedule(SLOW_RETRY_MS);
+}
+
+function dropSocketWith(sock, code, reason) {
+  abortSocketCommands(sock);
+  sock.onopen = null;
+  sock.onmessage = null;
+  sock.onclose = null;
+  sock.onerror = null;
+  try {
+    sock.close(code, reason);
+  } catch {
+    try {
+      sock.close();
+    } catch {}
+  }
+}
+
 async function sendHello(sock) {
   try {
     await permsReady;
   } catch {}
-  if (ws !== sock || sock.readyState !== WebSocket.OPEN) return;
   try {
-    sock.send(
-      JSON.stringify({
-        type: "hello",
-        role: "extension",
-        browser: detectBrowser(),
-        extensionId: chrome.runtime.id,
-        version: chrome.runtime.getManifest().version,
-        protocol: PROTOCOL_VERSION,
-        perms: { disabled: Array.from(disabledActions) },
-      })
-    );
+    await pairingReady;
   } catch {}
+  const hs = sockHs.get(sock);
+  if (ws !== sock || sock.readyState !== WebSocket.OPEN || !hs || hs.phase !== "hello") return;
+  hs.phase = "await";
+  sendOn(sock, {
+    type: "hello",
+    role: "extension",
+    browser: detectBrowser(),
+    extensionId: chrome.runtime.id,
+    version: chrome.runtime.getManifest().version,
+    protocol: PROTOCOL_VERSION,
+    perms: { disabled: Array.from(disabledActions) },
+    installId: pairing.installId,
+    nonce: hs.nonce,
+    hasKey: !!pairing.key,
+  });
+}
+
+// challenge: verify serverProof with the stored key, then prove ourselves.
+async function onChallenge(sock, hs, msg) {
+  const ns = msg.nonce;
+  const proof = msg.proof;
+  const key = pairing.key;
+  const installId = pairing.installId;
+  if (!key || typeof ns !== "string" || !HEX64_RE.test(ns) || typeof proof !== "string" || !HEX64_RE.test(proof)) {
+    rejectServer(sock, 4101, "server-auth-failed", "server-auth-failed");
+    return;
+  }
+  const extId = chrome.runtime.id;
+  const expected = await hmacHex(key, `browser-mcp/v3|server|${extId}|${installId}|${hs.port}|${hs.nonce}|${ns}`);
+  if (ws !== sock || hs.phase !== "verifying") return;
+  if (!hexEqual(expected, proof)) {
+    rejectServer(sock, 4101, "server-auth-failed", "server-auth-failed");
+    return;
+  }
+  const extProof = await hmacHex(key, `browser-mcp/v3|extension|${extId}|${installId}|${hs.port}|${ns}|${hs.nonce}`);
+  if (ws !== sock || hs.phase !== "verifying") return;
+  hs.phase = "verified";
+  // The server holds our key: a pending Re-pair is not needed any more.
+  if (acceptPairUntil) setAcceptPairUntil(0);
+  sendOn(sock, { type: "auth", proof: extProof });
+}
+
+// pair: trust on first use, or a Re-pair the user asked for in the popup.
+async function onPairOffer(sock, hs, msg) {
+  const ns = msg.nonce;
+  const key = msg.key;
+  if (typeof ns !== "string" || !HEX64_RE.test(ns) || typeof key !== "string" || !HEX64_RE.test(key)) {
+    rejectServer(sock, 4101, "server-auth-failed", "server-auth-failed");
+    return;
+  }
+  const repair = acceptPairUntil > Date.now();
+  if (pairing.key && !repair) {
+    // Already paired: replacing the key needs the user's Re-pair click.
+    rejectServer(sock, 4100, "pair-declined", "repair-offered");
+    return;
+  }
+  const prev = pairing.key;
+  pairing = { installId: pairing.installId, key };
+  try {
+    await savePairing();
+  } catch {
+    pairing = { installId: pairing.installId, key: prev };
+    rejectServer(sock, 4100, "pair-declined", "repair-offered");
+    return;
+  }
+  if (repair) setAcceptPairUntil(0);
+  const extProof = await hmacHex(key, `browser-mcp/v3|extension|${chrome.runtime.id}|${pairing.installId}|${hs.port}|${ns}|${hs.nonce}`);
+  if (ws !== sock || hs.phase !== "verifying") return;
+  hs.phase = "verified";
+  sendOn(sock, { type: "pair_accept", proof: extProof });
 }
 
 function onSocketMessage(sock, raw) {
@@ -245,9 +623,50 @@ function onSocketMessage(sock, raw) {
     return;
   }
   if (!msg || typeof msg !== "object" || Array.isArray(msg)) return;
-  if (msg.type === "ping") return;
-  if (msg.type === "welcome") {
+  const hs = sockHs.get(sock);
+  if (!hs || hs.phase === "closed") return;
+  const type = msg.type;
+  if (type === "ping") return;
+  if (type === "challenge" || type === "pair") {
+    // Exactly one challenge or pair offer, and only in answer to our hello.
+    if (hs.phase !== "await") {
+      rejectServer(sock, 4101, "server-auth-failed", "server-auth-failed");
+      return;
+    }
+    hs.phase = "verifying";
+    (type === "challenge" ? onChallenge(sock, hs, msg) : onPairOffer(sock, hs, msg)).catch(() =>
+      rejectServer(sock, 4101, "server-auth-failed", "server-auth-failed")
+    );
+    return;
+  }
+  if (type === "welcome") {
+    if (hs.phase === "paired") return;
+    if (hs.phase !== "verified") {
+      if (hs.phase === "verifying") {
+        // welcome before our proof was even sent: not a v3 server we can trust.
+        rejectServer(sock, 4101, "server-auth-failed", "server-auth-failed");
+      } else {
+        // welcome without a challenge / pair: a v2 server (or an impostor).
+        serverInfo = { version: null, protocol: Number.isInteger(msg.protocol) ? msg.protocol : null, pid: null };
+        rejectServer(sock, 4102, "server-outdated", "protocol-mismatch");
+      }
+      return;
+    }
+    hs.phase = "paired";
     paired = true;
+    pairState = "paired";
+    serverInfo = {
+      version: typeof msg.serverVersion === "string" ? capStr(msg.serverVersion, 50) : null,
+      protocol: Number.isInteger(msg.protocol) ? msg.protocol : null,
+      pid: Number.isInteger(msg.pid) ? msg.pid : null,
+    };
+    onBridgeUp();
+    return;
+  }
+  // Nothing below runs before the handshake completed on this socket.
+  if (hs.phase !== "paired") return;
+  if (type === "cancel") {
+    cancelBridgeCommand(sock, msg.id);
     return;
   }
   const id = msg.id;
@@ -256,13 +675,97 @@ function onSocketMessage(sock, raw) {
   runBridgeCommand(sock, msg);
 }
 
+// ---------- cancellation ----------
+// Running bridge commands: String(id) -> { ac, sock, ctx }. {type:"cancel", id}
+// from the socket that sent the command (or that socket going away) aborts
+// ctx.signal; the command then answers { id, ok:false, error:"cancelled" }.
+const runningCmds = new Map();
+
+function cancelledError() {
+  const e = new Error("cancelled");
+  e.name = "AbortError";
+  return e;
+}
+
+function throwIfAborted(signal) {
+  if (signal && signal.aborted) throw cancelledError();
+}
+
+// Rejects once the signal aborts (never resolves).
+function whenAborted(signal) {
+  return new Promise((_, reject) => {
+    if (signal.aborted) reject(cancelledError());
+    else signal.addEventListener("abort", () => reject(cancelledError()), { once: true });
+  });
+}
+
+function abortableSleep(ms, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal && signal.aborted) {
+      reject(cancelledError());
+      return;
+    }
+    let onAbort = null;
+    const timer = setTimeout(() => {
+      if (onAbort) signal.removeEventListener("abort", onAbort);
+      resolve(undefined);
+    }, Math.max(0, ms));
+    if (signal) {
+      onAbort = () => {
+        clearTimeout(timer);
+        reject(cancelledError());
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
+  });
+}
+
+function cancelBridgeCommand(sock, id) {
+  if ((typeof id !== "string" && typeof id !== "number") || id === "") return;
+  const e = runningCmds.get(String(id));
+  if (e && e.sock === sock) e.ac.abort();
+}
+
+function abortSocketCommands(sock) {
+  for (const e of runningCmds.values()) if (e.sock === sock) e.ac.abort();
+}
+
+// Actions that cannot navigate the page: they never count as the agent
+// causing a navigation of a fallback tab (see activeTabId).
+const NON_NAVIGATING_ACTIONS = new Set([
+  "tabs_list", "tab_pin", "tab_mute", "window_list", "frame_list", "frame_focus", "frame_clear", "tab_group_list",
+  "page_snapshot", "page_html", "page_text", "dom_query", "page_find", "page_wait", "page_axtree",
+  "page_screenshot", "page_pdf", "console_get", "console_clear", "network_requests", "network_clear",
+  "network_bodies", "har_export", "network_mock_list", "cookies_list", "cookies_get", "cookies_export",
+  "storage_get", "idb_list", "idb_stores", "idb_read", "idb_count", "dialog_get", "dialog_clear", "page_metrics",
+  "emulation_geolocation", "emulation_geolocation_clear", "emulation_viewport", "emulation_media", "emulation_cpu",
+  "emulation_reset", "perf_trace_start", "perf_trace_stop", "perf_trace_chunk",
+]);
+
+function touchTab(ctx, tabId) {
+  if (!Number.isInteger(tabId) || tabId < 0 || (ctx && ctx.mayNavigate === false)) return;
+  tabTouch.set(tabId, Date.now());
+  if (ctx && ctx.touched) ctx.touched.add(tabId);
+}
+
 async function runBridgeCommand(sock, msg) {
   const start = Date.now();
   const tabId = Number.isInteger(msg.tabId) ? msg.tabId : undefined;
   const payload = msg.payload && typeof msg.payload === "object" && !Array.isArray(msg.payload) ? msg.payload : {};
   const t = Number(msg.timeoutMs);
+  const ac = new AbortController();
   // ctx.timeoutMs = the server-side timeout of this command (toContent derives its own budget from it)
-  const ctx = { timeoutMs: Number.isFinite(t) && t > 0 ? t : undefined };
+  // ctx.signal    = aborted by a cancel frame or when the socket goes away
+  // ctx.touched   = tabs this command resolved that it may navigate (fallback rule)
+  const ctx = {
+    timeoutMs: Number.isFinite(t) && t > 0 ? t : undefined,
+    signal: ac.signal,
+    touched: new Set(),
+    mayNavigate: !NON_NAVIGATING_ACTIONS.has(normalizeAction(msg.action)),
+  };
+  const key = String(msg.id);
+  const entry = { ac, sock, ctx };
+  runningCmds.set(key, entry);
   let ok = true;
   let errStr = null;
   // Replies always go to the socket the command arrived on.
@@ -273,7 +776,10 @@ async function runBridgeCommand(sock, msg) {
     } catch {}
   };
   try {
-    const result = await handleCommand(msg.action, payload, tabId, ctx);
+    const run = handleCommand(msg.action, payload, tabId, ctx);
+    run.catch(() => {});
+    // A handler that ignores the signal still answers "cancelled" at once.
+    const result = await Promise.race([run, whenAborted(ac.signal)]);
     noteAgentTabsFromResult(msg.action, result);
     let frame;
     try {
@@ -284,9 +790,12 @@ async function runBridgeCommand(sock, msg) {
     reply(frame);
   } catch (e) {
     ok = false;
-    errStr = String((e && e.message) || e);
+    errStr = ac.signal.aborted ? "cancelled" : String((e && e.message) || e);
     reply(JSON.stringify({ id: msg.id, ok: false, error: errStr }));
   } finally {
+    if (runningCmds.get(key) === entry) runningCmds.delete(key);
+    const now = Date.now();
+    for (const id of ctx.touched) tabTouch.set(id, now);
     recordCommandHistory({
       id: msg.id,
       action: msg.action,
@@ -321,12 +830,17 @@ function setPort(newPort) {
     paired = false;
     onBridgeDown();
   }
+  pairState = "none";
   reconnectMs = 1000;
   connect();
 }
 
 // Popup-only data: content scripts must not read or write storage.local
-// (permission switches, port).
+// (permission switches, port). Chromium accepts this for the local area only
+// from version 140 (older versions reject it, and content scripts can then
+// write storage.local), so nothing read from it is trusted blindly: switches
+// only tighten (see the onChanged merge), a stored port is not applied from
+// storage changes, and the pairing key lives in IndexedDB instead.
 try {
   if (chrome.storage && chrome.storage.local && chrome.storage.local.setAccessLevel) {
     Promise.resolve(chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" })).catch(() => {});
@@ -354,7 +868,8 @@ if (typeof chrome !== "undefined" && chrome.alarms) {
   try {
     chrome.alarms.create("mcp_heartbeat", { periodInMinutes: 0.5 });
     chrome.alarms.onAlarm.addListener((alarm) => {
-      if (alarm.name === "mcp_heartbeat" && !bridgeOpen()) connect();
+      // A pending retry (30 s after a rejection) keeps its schedule.
+      if (alarm.name === "mcp_heartbeat" && !bridgeOpen() && !reconnectTimer) connect();
     });
   } catch {}
 }
@@ -369,6 +884,7 @@ function saveSessionState() {
         mcpState: {
           dialogPolicy: { ...dialogPolicy },
           agentTabs: Array.from(agentTabs),
+          fallbackTabs: Array.from(fallbackTabs.entries()),
           stickyFrames: Array.from(stickyFrames.entries()),
         },
       })
@@ -391,6 +907,11 @@ async function restoreSessionState() {
       for (const id of Array.isArray(st.agentTabs) ? st.agentTabs : []) {
         if (live.has(id)) agentTabs.add(id);
       }
+      for (const e of Array.isArray(st.fallbackTabs) ? st.fallbackTabs : []) {
+        const [id, origin] = Array.isArray(e) ? e : [];
+        if (!live.has(id) || agentTabs.has(id)) continue;
+        fallbackTabs.set(id, typeof origin === "string" ? capStr(origin, 2048) : "");
+      }
       for (const e of Array.isArray(st.stickyFrames) ? st.stickyFrames : []) {
         const [id, f] = Array.isArray(e) ? e : [];
         if (!live.has(id) || stickyFrames.has(id) || !f || typeof f !== "object") continue;
@@ -402,9 +923,12 @@ async function restoreSessionState() {
 }
 const stateReady = restoreSessionState();
 
+// Full agent tab (created by the agent or targeted with an explicit tabId):
+// console + dialog hooks. A fallback tab targeted explicitly is promoted.
 function markAgentTab(tabId) {
   if (!Number.isInteger(tabId) || tabId < 0 || agentTabs.has(tabId)) return;
   agentTabs.add(tabId);
+  fallbackTabs.delete(tabId);
   saveSessionState();
   chrome.tabs.get(tabId).then(
     () => installPageHooks(tabId),
@@ -412,6 +936,47 @@ function markAgentTab(tabId) {
       if (agentTabs.delete(tabId)) saveSessionState();
     }
   );
+}
+
+function urlOrigin(url) {
+  try {
+    return new URL(String(url || "")).origin;
+  } catch {
+    return "";
+  }
+}
+
+// Active-tab fallback target (see activeTabId): console hook only.
+function markFallbackTab(tabId, url) {
+  if (!Number.isInteger(tabId) || tabId < 0 || agentTabs.has(tabId)) return;
+  const origin = urlOrigin(url);
+  const isNew = !fallbackTabs.has(tabId);
+  if (!isNew && fallbackTabs.get(tabId) === origin) return;
+  fallbackTabs.set(tabId, origin);
+  saveSessionState();
+  if (isNew) installPageHooks(tabId);
+}
+
+// Within this window after a navigating command touched the tab (or while
+// such a command still runs on it), a navigation counts as agent-caused.
+const AGENT_NAV_WINDOW_MS = 10000;
+
+function agentCausedNavigation(tabId) {
+  const ts = tabTouch.get(tabId);
+  if (ts && Date.now() - ts <= AGENT_NAV_WINDOW_MS) return true;
+  for (const e of runningCmds.values()) if (e.ctx.touched.has(tabId)) return true;
+  return false;
+}
+
+// Main-frame commit in a fallback tab: a cross-origin navigation the agent
+// did not cause ends the fallback status (the new document gets no hooks).
+function checkFallbackNavigation(tabId, url) {
+  if (!fallbackTabs.has(tabId)) return;
+  const origin = urlOrigin(url);
+  if (origin === fallbackTabs.get(tabId)) return;
+  if (agentCausedNavigation(tabId)) fallbackTabs.set(tabId, origin);
+  else fallbackTabs.delete(tabId);
+  saveSessionState();
 }
 
 // Tabs created by the agent become agent tabs as well.
@@ -801,20 +1366,26 @@ function dialogHookPolicy() {
 }
 
 // Hooks go only into the main frame of agent tabs, and only while the bridge
-// is connected (navigation re-installs; markAgentTab installs immediately).
+// is paired (navigation re-installs; markAgentTab installs immediately).
+// Fallback tabs get the console hook only: dialogs are auto-answered only in
+// tabs the agent created or targeted with an explicit tabId.
 async function installPageHooks(tabId) {
   if (!Number.isInteger(tabId) || tabId < 0) return;
-  if (!agentTabs.has(tabId) || !bridgeOpen()) return;
+  const full = agentTabs.has(tabId);
+  if ((!full && !fallbackTabs.has(tabId)) || !bridgePaired()) return;
   const consoleOn = permsLoaded && isAllowed("console_get");
-  await Promise.all([
-    runInMainWorld(tabId, mcpPageHookMain, [consoleOn]),
-    runInMainWorld(tabId, mcpDialogHookMain, [dialogHookPolicy()]),
-  ]);
+  const jobs = [runInMainWorld(tabId, mcpPageHookMain, [consoleOn])];
+  if (full) jobs.push(runInMainWorld(tabId, mcpDialogHookMain, [dialogHookPolicy()]));
+  await Promise.all(jobs);
+}
+
+function hookedTabs() {
+  return new Set([...agentTabs, ...fallbackTabs.keys()]);
 }
 
 function refreshAgentHooks() {
   stateReady.then(() => {
-    for (const id of agentTabs) installPageHooks(id);
+    for (const id of hookedTabs()) installPageHooks(id);
   });
 }
 
@@ -822,47 +1393,89 @@ function refreshAgentHooks() {
 async function pushDialogPolicyToAgentTabs() {
   saveSessionState();
   await stateReady;
-  if (!bridgeOpen()) return;
+  if (!bridgePaired()) return;
   const policy = dialogHookPolicy();
   await Promise.all(Array.from(agentTabs, (id) => runInMainWorld(id, mcpDialogHookMain, [policy])));
 }
 
-// Bridge down for longer than the grace period: agent tabs get native dialogs
-// back and stop console capture (a short reconnect keeps automation intact).
+// Bridge down (closed or never paired) for longer than the grace period:
+// agent tabs get native dialogs back and stop console capture, and fallback
+// tabs lose their status (a short reconnect keeps automation intact).
 const PASSTHROUGH_GRACE_MS = 15000;
 let passthroughTimer = null;
 let bridgeUp = false;
 
+function startPassthroughTimer() {
+  if (passthroughTimer) clearTimeout(passthroughTimer);
+  passthroughTimer = setTimeout(() => {
+    passthroughTimer = null;
+    if (bridgePaired()) return;
+    for (const id of hookedTabs()) runInMainWorld(id, mcpHooksOffMain, []);
+    if (fallbackTabs.size) {
+      fallbackTabs.clear();
+      saveSessionState();
+    }
+  }, PASSTHROUGH_GRACE_MS);
+}
+
+// Called on welcome (paired), not on socket open.
 function onBridgeUp() {
   bridgeUp = true;
   if (passthroughTimer) {
     clearTimeout(passthroughTimer);
     passthroughTimer = null;
   }
+  cancelSessionTeardown();
+  setBridgeDownAt(0);
   refreshAgentHooks();
+  resumeDebugSessions().catch(() => {});
 }
 
-// Idempotent: only the up -> down transition starts the grace timer.
+// Idempotent: only the up -> down transition starts the grace timers.
 function onBridgeDown() {
   if (!bridgeUp) return;
   bridgeUp = false;
-  if (passthroughTimer) clearTimeout(passthroughTimer);
-  passthroughTimer = setTimeout(() => {
-    passthroughTimer = null;
-    if (bridgeOpen()) return;
-    for (const id of agentTabs) runInMainWorld(id, mcpHooksOffMain, []);
-  }, PASSTHROUGH_GRACE_MS);
+  setBridgeDownAt(Date.now());
+  armSessionTeardown(SESSION_TEARDOWN_MS);
+  startPassthroughTimer();
+}
+
+// ---------- debugger session teardown timer ----------
+// Debugger-backed sessions (registry below) are torn down once the bridge has
+// been down for SESSION_TEARDOWN_MS. The moment it went down is mirrored in
+// storage.session, so a worker restart in between keeps the deadline.
+const SESSION_TEARDOWN_MS = 30000;
+let sessionTeardownTimer = null;
+
+function setBridgeDownAt(ts) {
+  try {
+    Promise.resolve(ts ? chrome.storage.session.set({ mcpBridgeDownAt: ts }) : chrome.storage.session.remove("mcpBridgeDownAt")).catch(() => {});
+  } catch {}
+}
+
+function armSessionTeardown(delayMs) {
+  if (sessionTeardownTimer) clearTimeout(sessionTeardownTimer);
+  sessionTeardownTimer = setTimeout(() => {
+    sessionTeardownTimer = null;
+    if (bridgePaired()) return;
+    discardPendingRestore();
+    teardownDebugSessions().catch(() => {});
+  }, Math.max(0, delayMs));
+}
+
+function cancelSessionTeardown() {
+  if (sessionTeardownTimer) {
+    clearTimeout(sessionTeardownTimer);
+    sessionTeardownTimer = null;
+  }
 }
 
 // Service-worker restart: bridgeUp starts false, so onBridgeDown would never
 // fire if the bridge does not come back, and the restored agent tabs would
 // keep auto-accepting hooks. Start the grace timer once the state is
-// restored; a later onopen (onBridgeUp) cancels it.
+// restored; a later welcome (onBridgeUp) cancels it.
 stateReady.then(() => {
-  if (!bridgeOpen() && !passthroughTimer && agentTabs.size) {
-    bridgeUp = true;
-    onBridgeDown();
-  }
+  if (!bridgePaired() && !passthroughTimer && (agentTabs.size || fallbackTabs.size)) startPassthroughTimer();
 });
 
 // Extension reload / update: storage.session (agentTabs) is wiped, but the
@@ -888,6 +1501,7 @@ if (chrome.webNavigation && chrome.webNavigation.onCompleted) {
     if (d.frameId !== 0) return;
     stateReady.then(() => {
       clearStickyFrame(d.tabId);
+      checkFallbackNavigation(d.tabId, d.url);
       installPageHooks(d.tabId);
     });
   });
@@ -898,11 +1512,22 @@ if (chrome.webNavigation && chrome.webNavigation.onCompleted) {
 }
 
 // ---------- helpers ----------
-// Resolves the command target when no tabId was given; the tab becomes an agent tab.
-async function activeTabId() {
+// Resolves the command target when no tabId was given.
+// Active-tab fallback rule: the user's focused tab must not become a permanent
+// agent tab. It becomes only a *fallback* tab: console hook (when console_get
+// is allowed), never the dialog auto-accept hook, which is reserved for tabs
+// the agent created (tab_create / tab_duplicate / window_create) or targeted
+// with an explicit tabId (markAgentTab). The fallback status ends on a
+// main-frame cross-origin navigation the agent did not cause (no navigating
+// command touched the tab within AGENT_NAV_WINDOW_MS and none is running on
+// it), when the tab closes, and once the bridge has been down for the
+// passthrough grace period. Targeting it later with an explicit tabId
+// promotes it to a full agent tab.
+async function activeTabId(ctx) {
   const [t] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
   if (!t) throw new Error("No active tab");
-  markAgentTab(t.id);
+  touchTab(ctx, t.id);
+  markFallbackTab(t.id, t.url);
   return t.id;
 }
 
@@ -974,48 +1599,79 @@ async function resolveStickyFrame(tabId) {
   return pick.frameId;
 }
 
-async function ensureContent(tabId, frameId = 0, retries = 4) {
+async function ensureContent(tabId, frameId = 0, retries = 4, signal) {
   let lastErr = null;
   for (let i = 0; i < retries; i++) {
+    throwIfAborted(signal);
     try {
       await chrome.tabs.sendMessage(tabId, { __mcp: 1, cmd: "__ping", payload: {} }, { frameId });
       return;
     } catch (e) {
       lastErr = e;
     }
+    throwIfAborted(signal);
     // missing, or waking from bfcache: inject and wait a bit
     try {
       await chrome.scripting.executeScript({ target: { tabId, frameIds: [frameId] }, files: ["content.js"] });
     } catch (e) {
       lastErr = e;
     }
-    await new Promise((r) => setTimeout(r, 400 * (i + 1)));
+    await abortableSleep(400 * (i + 1), signal);
   }
   throw lastErr || new Error("Could not install content script");
 }
 
+// One content-script round trip to one frame. Every message carries a unique
+// cmdId; on cancellation (signal) or timeout the frame gets
+// { __mcp:1, cmd:"__cancel", payload:{ cmdId } } so long content work
+// (page_wait, dom_type with a delay) stops as well.
+let contentCmdSeq = 0;
+async function contentRequest(tabId, frameId, cmd, payload, waitMs, signal) {
+  throwIfAborted(signal);
+  const cmdId = `c${Date.now().toString(36)}-${++contentCmdSeq}`;
+  const cancelInContent = () => {
+    try {
+      Promise.resolve(chrome.tabs.sendMessage(tabId, { __mcp: 1, cmd: "__cancel", payload: { cmdId } }, { frameId })).catch(() => {});
+    } catch {}
+  };
+  let timer = null;
+  let onAbort = null;
+  const stop = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      cancelInContent();
+      reject(new Error(`Content did not respond (${cmd})`));
+    }, waitMs);
+    if (signal) {
+      onAbort = () => {
+        cancelInContent();
+        reject(cancelledError());
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
+  });
+  try {
+    return await Promise.race([chrome.tabs.sendMessage(tabId, { __mcp: 1, cmd, payload, cmdId }, { frameId }), stop]);
+  } finally {
+    clearTimeout(timer);
+    if (onAbort) signal.removeEventListener("abort", onAbort);
+  }
+}
+
 // Sends one command to ONE frame (the focused frame, else the main frame).
 // timeoutMs = the server-side timeout of the command (ctx.timeoutMs); the
-// content budget stays below it. Without it the budget is 25 s.
-async function toContent(tabId, cmd, payload, timeoutMs) {
+// content budget stays below it. Without it the budget is 25 s. ctx (the
+// command context) supplies the cancel signal and the fallback bookkeeping.
+async function toContent(tabId, cmd, payload, timeoutMs, ctx) {
+  const signal = ctx && ctx.signal;
   const started = Date.now();
-  const id = tabId ?? (await activeTabId());
+  const id = tabId ?? (await activeTabId(ctx));
   const frameId = await resolveStickyFrame(id);
-  await ensureContent(id, frameId);
+  await ensureContent(id, frameId, undefined, signal);
   const hasDeadline = Number.isFinite(timeoutMs) && timeoutMs > 0;
   const budget = hasDeadline ? Math.max(5000, timeoutMs - 1500) : 25000;
   const wait = hasDeadline ? Math.max(2000, budget - (Date.now() - started)) : budget;
-  const msg = { __mcp: 1, cmd, payload };
-  let timer = null;
-  const timeout = new Promise((_, rej) => {
-    timer = setTimeout(() => rej(new Error(`Content did not respond (${cmd})`)), wait);
-  });
-  try {
-    const value = await Promise.race([chrome.tabs.sendMessage(id, msg, { frameId }), timeout]);
-    return { tabId: id, frameId, value };
-  } finally {
-    clearTimeout(timer);
-  }
+  const value = await contentRequest(id, frameId, cmd, payload, wait, signal);
+  return { tabId: id, frameId, value };
 }
 
 function unwrap(res) {
@@ -1057,7 +1713,15 @@ async function dbgEnsureAttached(tabId, st) {
   try {
     await chrome.debugger.attach(dbg, "1.3");
   } catch (e) {
-    if (!/already attached/i.test(String((e && e.message) || e))) throw e;
+    const msg = String((e && e.message) || e);
+    if (/URL of different extension/i.test(msg)) {
+      // Chrome refuses to debug a page that shows a frame of another extension
+      // (password managers and security software inject such overlays).
+      throw new Error(
+        `Chrome refused to attach the debugger to tab ${tabId}: the page contains a frame of another extension (a password manager or security-software overlay, for example). Close that overlay or reload the tab, then try again. (${capStr(msg, 200)})`
+      );
+    }
+    if (!/already attached/i.test(msg)) throw e;
     // Our own attach survived (service-worker restart, leaked session): adopt
     // it when commands go through; otherwise another client owns the tab.
     try {
@@ -1101,13 +1765,14 @@ async function withDebugger(tabId, fn) {
   }
 }
 
-// Persistent holder (key: "mock" | "emulation" | "throttle" | "headers").
+// Persistent holder (key: "mock" | "emulation" | "throttle" | "headers" | "perf").
 // Idempotent per key. Returns the debuggee { tabId }.
 async function acquireDebugger(tabId, key) {
   await dbgSerial(tabId, async (st) => {
     await dbgEnsureAttached(tabId, st);
     st.holders.add(String(key));
   });
+  saveDebugTabs();
   return { tabId };
 }
 
@@ -1117,6 +1782,7 @@ async function releaseDebugger(tabId, key) {
     st.holders.delete(String(key));
     await dbgMaybeDetach(tabId, st);
   });
+  saveDebugTabs();
 }
 
 function hasDebuggerHolder(tabId, key) {
@@ -1124,29 +1790,243 @@ function hasDebuggerHolder(tabId, key) {
   return !!(st && st.attached && st.holders.has(String(key)));
 }
 
+// ---------- debugger-backed sessions: one registry, one teardown ----------
+// Every persistent CDP state the agent can leave on a tab registers here:
+// its per-tab state map, the persistent debugger holder it keeps, the actions
+// that control it and clear(dbg, state, tabId), which resets the CDP state.
+// Wave-2 emulation_* state plugs in with registerDebugSession (holder
+// "emulation" may be shared: the holder is released only when no kind using
+// it has state on the tab any more). Teardown runs when a controlling action
+// is disabled (setDisabled), once the bridge has been down for
+// SESSION_TEARDOWN_MS, and from the stop / clear actions themselves; nothing
+// is re-armed after a worker restart without a paired bridge (pendingRestore).
+const debugSessionKinds = new Map(); // name -> { name, holder, actions, sessions, clear, onChange }
+
+function registerDebugSession(name, def) {
+  debugSessionKinds.set(String(name), {
+    name: String(name),
+    holder: String(def.holder),
+    actions: Array.isArray(def.actions) ? def.actions.slice() : [],
+    sessions: def.sessions,
+    clear: def.clear,
+    onChange: def.onChange,
+  });
+}
+
+async function releaseHolderIfUnused(tabId, holder) {
+  for (const k of debugSessionKinds.values()) if (k.holder === holder && k.sessions.has(tabId)) return;
+  await releaseDebugger(tabId, holder);
+}
+
+// Clears one kind's state on one tab. Resolves true when there was state.
+async function teardownDebugSession(name, tabId) {
+  const k = debugSessionKinds.get(name);
+  if (!k || !Number.isInteger(tabId)) return false;
+  const state = k.sessions.get(tabId);
+  // A held holder without state counts only when no other kind sharing it
+  // has state on the tab (a leftover of this kind, not someone else's).
+  let shared = false;
+  for (const o of debugSessionKinds.values()) if (o !== k && o.holder === k.holder && o.sessions.has(tabId)) shared = true;
+  const had = k.sessions.has(tabId) || (!shared && hasDebuggerHolder(tabId, k.holder));
+  // Dropped first: debugger events stop using it while the reset runs.
+  k.sessions.delete(tabId);
+  if (had && typeof k.clear === "function") {
+    try {
+      await k.clear({ tabId }, state, tabId);
+    } catch {}
+  }
+  if (typeof k.onChange === "function") {
+    try {
+      k.onChange();
+    } catch {}
+  }
+  await releaseHolderIfUnused(tabId, k.holder).catch(() => {});
+  return had;
+}
+
+// Every tab of every kind matching `match` (all kinds without it), including
+// a held holder whose state entry is missing.
+async function teardownDebugSessions(match) {
+  const jobs = [];
+  for (const k of debugSessionKinds.values()) {
+    if (match && !match(k)) continue;
+    const tabs = new Set(k.sessions.keys());
+    for (const [tabId, st] of dbgTabs) if (st.holders.has(k.holder)) tabs.add(tabId);
+    for (const tabId of tabs) jobs.push(teardownDebugSession(k.name, tabId));
+  }
+  await Promise.all(jobs);
+}
+
+// One tab, every kind matching `match` (all without it), one after the other;
+// resolves the names that had state. emulation_reset (wave 2):
+// teardownTabDebugSessions(tabId, (k) => k.holder === "emulation").
+async function teardownTabDebugSessions(tabId, match) {
+  const cleared = [];
+  for (const k of Array.from(debugSessionKinds.values())) {
+    if (match && !match(k)) continue;
+    if (await teardownDebugSession(k.name, tabId)) cleared.push(k.name);
+  }
+  return cleared;
+}
+
+// Drops every kind's state of a tab whose debugger session is gone (tab
+// closed, external detach); no CDP call is possible any more.
+function forgetDebugSessions(tabId) {
+  for (const k of debugSessionKinds.values()) {
+    if (k.sessions.delete(tabId) && typeof k.onChange === "function") {
+      try {
+        k.onChange();
+      } catch {}
+    }
+  }
+}
+
+registerDebugSession("mock", {
+  holder: "mock",
+  actions: ["network_mock_start", "network_mock_route"],
+  sessions: fetchSessions,
+  clear: (dbg) => cdpSend(dbg, "Fetch.disable", {}),
+  onChange: () => saveMockSessions(),
+});
+registerDebugSession("throttle", {
+  holder: "throttle",
+  actions: ["network_throttle"],
+  sessions: throttleSessions,
+  clear: (dbg) => cdpSend(dbg, "Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 }),
+});
+registerDebugSession("headers", {
+  holder: "headers",
+  actions: ["network_set_headers"],
+  sessions: headerSessions,
+  clear: (dbg) => cdpSend(dbg, "Network.setExtraHTTPHeaders", { headers: {} }),
+});
+registerDebugSession("geolocation", {
+  holder: "emulation",
+  actions: ["emulation_geolocation"],
+  sessions: emulationSessions,
+  clear: (dbg) => cdpSend(dbg, "Emulation.clearGeolocationOverride", {}),
+});
+registerDebugSession("viewport", {
+  holder: "emulation",
+  actions: ["emulation_viewport"],
+  sessions: viewportSessions,
+  clear: (dbg) =>
+    cdpSendEach(dbg, [
+      ["Emulation.clearDeviceMetricsOverride", {}],
+      ["Emulation.setTouchEmulationEnabled", { enabled: false }],
+    ]),
+});
+registerDebugSession("media", {
+  holder: "emulation",
+  actions: ["emulation_media"],
+  sessions: mediaSessions,
+  clear: (dbg) => cdpSend(dbg, "Emulation.setEmulatedMedia", { media: "", features: [] }),
+});
+registerDebugSession("cpu", {
+  holder: "emulation",
+  actions: ["emulation_cpu"],
+  sessions: cpuSessions,
+  clear: (dbg) => cdpSend(dbg, "Emulation.setCPUThrottlingRate", { rate: 1 }),
+});
+// A running trace: ending it on teardown discards the data (no collector
+// listens any more); perf_trace_stop is the only way to keep a trace.
+registerDebugSession("trace", {
+  holder: "perf",
+  actions: ["perf_trace_start", "perf_trace_stop"],
+  sessions: traceSessions,
+  clear: (dbg) => cdpSend(dbg, "Tracing.end", {}),
+  onChange: () => onTraceSessionsChanged(),
+});
+
+// ---------- worker restart: parked sessions ----------
+// The previous worker's mock sessions (storage.session "mcpMock") and the tabs
+// that held a persistent debugger session ("mcpDbgTabs") are parked here until
+// a paired bridge is back (resumeDebugSessions re-arms allowed mock sessions)
+// or the bridge-down deadline passes (discardPendingRestore). Either way a
+// surviving attach this worker does not use is detached, which ends any
+// leftover throttle / header / emulation override with it.
+let pendingRestore = null; // { mock: [{ tabId, routes }], tabs: [tabId] }
+
 async function saveMockSessions() {
+  const list = Array.from(fetchSessions.entries()).map(([tabId, s]) => ({ tabId, routes: s.routes }));
+  if (pendingRestore) for (const s of pendingRestore.mock) if (s && !fetchSessions.has(s.tabId)) list.push(s);
   try {
-    await chrome.storage.session.set({
-      mcpMock: Array.from(fetchSessions.entries()).map(([tabId, s]) => ({ tabId, routes: s.routes })),
-    });
+    await chrome.storage.session.set({ mcpMock: list });
   } catch {}
 }
 
-async function restoreMockSessions() {
-  let saved = null;
+function saveDebugTabs() {
+  const tabs = [];
+  for (const [tabId, st] of dbgTabs) if (st.holders.size) tabs.push(tabId);
+  if (pendingRestore) for (const id of pendingRestore.tabs) if (!tabs.includes(id)) tabs.push(id);
   try {
-    const got = await chrome.storage.session.get("mcpMock");
-    saved = got && got.mcpMock;
-  } catch {
-    return;
+    Promise.resolve(chrome.storage.session.set({ mcpDbgTabs: tabs })).catch(() => {});
+  } catch {}
+}
+
+// Detaches an attach that survived a worker restart, unless this worker uses it.
+function detachLeftover(tabId) {
+  if (!Number.isInteger(tabId) || tabId < 0) return;
+  chrome.tabs.get(tabId).then(
+    () =>
+      dbgSerial(tabId, async (st) => {
+        if (st.attached || st.transient > 0 || st.holders.size > 0) return;
+        try {
+          await chrome.debugger.detach({ tabId });
+        } catch {}
+      }).catch(() => {}),
+    () => {}
+  );
+}
+
+const debugRestoreReady = (async () => {
+  let mock = [];
+  let tabs = [];
+  let downAt = NaN;
+  try {
+    const got = await chrome.storage.session.get(["mcpMock", "mcpDbgTabs", "mcpBridgeDownAt"]);
+    mock = Array.isArray(got && got.mcpMock) ? got.mcpMock.filter((s) => s && Number.isInteger(s.tabId)) : [];
+    tabs = Array.isArray(got && got.mcpDbgTabs) ? got.mcpDbgTabs.filter((t) => Number.isInteger(t)) : [];
+    downAt = Number(got && got.mcpBridgeDownAt);
+  } catch {}
+  if (!mock.length && !tabs.length) return;
+  pendingRestore = { mock, tabs };
+  if (bridgePaired()) return; // onBridgeUp -> resumeDebugSessions takes over
+  // Down since the last recorded moment, or since now (the old worker died
+  // while the bridge was up).
+  if (!Number.isFinite(downAt) || downAt <= 0 || downAt > Date.now()) {
+    downAt = Date.now();
+    setBridgeDownAt(downAt);
   }
-  if (!Array.isArray(saved) || !saved.length) return;
+  armSessionTeardown(downAt + SESSION_TEARDOWN_MS - Date.now());
+})();
+
+function discardPendingRestore() {
+  const p = pendingRestore;
+  if (!p) return;
+  pendingRestore = null;
+  saveMockSessions();
+  saveDebugTabs();
+  for (const tabId of new Set([...p.tabs, ...p.mock.map((s) => s.tabId)])) detachLeftover(tabId);
+}
+
+// Paired bridge back: re-arm the parked mock sessions whose controlling
+// actions are still enabled; everything else parked is dropped.
+async function resumeDebugSessions() {
+  await debugRestoreReady;
+  await permsReady;
+  const p = pendingRestore;
+  if (!p || !bridgePaired()) return;
+  pendingRestore = null;
   let live = new Set();
   try {
     live = new Set((await chrome.tabs.query({})).map((t) => t.id));
   } catch {}
-  for (const s of saved) {
-    if (!s || !live.has(s.tabId) || fetchSessions.has(s.tabId)) continue;
+  const mockKind = debugSessionKinds.get("mock");
+  const allowed = mockKind.actions.every((a) => isAllowed(a));
+  const restored = new Set();
+  for (const s of allowed ? p.mock : []) {
+    if (!live.has(s.tabId) || fetchSessions.has(s.tabId)) continue;
     const routes = Array.isArray(s.routes) ? s.routes : [];
     for (const r of routes) {
       const n = /^r(\d+)$/.exec(String(r && r.id));
@@ -1161,17 +2041,20 @@ async function restoreMockSessions() {
       try {
         await cdpSend(dbg, "Network.enable", {});
       } catch {}
+      restored.add(s.tabId);
     } catch {
       fetchSessions.delete(s.tabId);
       try {
-        await releaseDebugger(s.tabId, "mock");
+        await releaseHolderIfUnused(s.tabId, "mock");
       } catch {}
     }
   }
   saveMockSessions();
+  saveDebugTabs();
+  for (const tabId of new Set([...p.tabs, ...p.mock.map((s) => s.tabId)])) {
+    if (!restored.has(tabId) && live.has(tabId)) detachLeftover(tabId);
+  }
 }
-
-restoreMockSessions();
 
 function cdpSend(dbg, method, params) {
   return new Promise((resolve, reject) => {
@@ -1180,6 +2063,20 @@ function cdpSend(dbg, method, params) {
       else resolve(result);
     });
   });
+}
+
+// Runs every [method, params] even when an earlier one fails (teardown:
+// reset as much as possible); rejects with the first error afterwards.
+async function cdpSendEach(dbg, calls) {
+  let first = null;
+  for (const [method, params] of calls) {
+    try {
+      await cdpSend(dbg, method, params);
+    } catch (e) {
+      if (!first) first = e;
+    }
+  }
+  if (first) throw first;
 }
 
 // ---------- network hook (webRequest) ----------
@@ -1258,6 +2155,146 @@ chrome.webRequest.onHeadersReceived.addListener(
   ["responseHeaders"]
 );
 
+// ---------- in-flight requests per tab (page_wait networkIdle) ----------
+// Counts only (no URLs, nothing streamed), independent of network capture,
+// its permission and its buffers, so it is always on. Not counted:
+// - requests outside a tab (tabId -1: service / shared workers, the
+//   extension itself) and requests of prerendering documents;
+// - WebSockets (type "websocket") and responses that turn out to be streams
+//   (Content-Type text/event-stream = EventSource, multipart/x-mixed-replace);
+// - anything in flight for longer than NET_LONG_LIVED_MS (long-polling, hung
+//   requests, a completion event that never came).
+// Media and download streams still count: maxInflight absorbs them. A
+// service-worker restart forgets the requests already in flight (undercount).
+const NET_LONG_LIVED_MS = 60000;
+const NET_MAX_PER_TAB = 2000;
+const netInflight = new Map(); // tabId -> Map<requestId, startedAt ms>
+const netWaiters = new Map(); // tabId -> Set<(gone?: boolean) => void>
+
+function netNotify(tabId, gone) {
+  const set = netWaiters.get(tabId);
+  if (!set) return;
+  for (const fn of Array.from(set)) {
+    try {
+      fn(gone);
+    } catch {}
+  }
+}
+
+function netStart(d) {
+  if (!d || !Number.isInteger(d.tabId) || d.tabId < 0 || d.type === "websocket") return;
+  if (d.documentLifecycle === "prerender") return;
+  let m = netInflight.get(d.tabId);
+  if (!m) netInflight.set(d.tabId, (m = new Map()));
+  const id = String(d.requestId);
+  // A redirect fires onBeforeRequest again with the same id: keep its start.
+  if (m.has(id)) return;
+  m.set(id, Date.now());
+  if (m.size > NET_MAX_PER_TAB) m.delete(m.keys().next().value);
+  netNotify(d.tabId);
+}
+
+function netEnd(d) {
+  if (!d) return;
+  const m = netInflight.get(d.tabId);
+  if (!m || !m.delete(String(d.requestId))) return;
+  if (!m.size) netInflight.delete(d.tabId);
+  netNotify(d.tabId);
+}
+
+// In-flight requests of a tab, the long-lived ones excluded.
+function netCount(tabId, now) {
+  const m = netInflight.get(tabId);
+  if (!m) return 0;
+  let n = 0;
+  for (const t of m.values()) if (now - t < NET_LONG_LIVED_MS) n++;
+  return n;
+}
+
+chrome.webRequest.onBeforeRequest.addListener(netStart, { urls: ["<all_urls>"] });
+chrome.webRequest.onCompleted.addListener(netEnd, { urls: ["<all_urls>"] });
+chrome.webRequest.onErrorOccurred.addListener(netEnd, { urls: ["<all_urls>"] });
+// The same request goes on after a redirect, unless it leaves the schemes
+// webRequest reports (data:, blob:, extension pages): then it ends here.
+if (chrome.webRequest.onBeforeRedirect) {
+  chrome.webRequest.onBeforeRedirect.addListener(
+    (d) => {
+      if (!/^(?:https?|wss?|ftp|file):/i.test(String((d && d.redirectUrl) || ""))) netEnd(d);
+    },
+    { urls: ["<all_urls>"] }
+  );
+}
+if (chrome.webRequest.onResponseStarted) {
+  chrome.webRequest.onResponseStarted.addListener(
+    (d) => {
+      const h = ((d && d.responseHeaders) || []).find((x) => x && String(x.name).toLowerCase() === "content-type");
+      if (h && /^\s*(?:text\/event-stream|multipart\/x-mixed-replace)/i.test(String(h.value || ""))) netEnd(d);
+    },
+    { urls: ["<all_urls>"] },
+    ["responseHeaders"]
+  );
+}
+chrome.tabs.onRemoved.addListener((tabId) => {
+  netInflight.delete(tabId);
+  netNotify(tabId, true);
+});
+
+// Resolves { inflight } once the tab has had <= maxInflight requests in
+// flight for idleMs without a break; rejects at the deadline, on cancel and
+// when the tab closes. Every start / end re-checks, so a short request
+// between two polls still restarts the quiet period.
+function netWaitIdle(tabId, idleMs, maxInflight, deadline, signal, t0) {
+  return new Promise((resolve, reject) => {
+    let quietSince = null;
+    let done = false;
+    let timer = null;
+    let onAbort = null;
+    let set = netWaiters.get(tabId);
+    if (!set) netWaiters.set(tabId, (set = new Set()));
+    const finish = (fn, v) => {
+      if (done) return;
+      done = true;
+      clearInterval(timer);
+      set.delete(check);
+      if (!set.size && netWaiters.get(tabId) === set) netWaiters.delete(tabId);
+      if (onAbort) signal.removeEventListener("abort", onAbort);
+      fn(v);
+    };
+    function check(gone) {
+      if (done) return;
+      if (gone) {
+        finish(reject, new Error(`Tab ${tabId} was closed while waiting for the network to go idle`));
+        return;
+      }
+      const now = Date.now();
+      const n = netCount(tabId, now);
+      if (n > maxInflight) quietSince = null;
+      else if (quietSince === null) quietSince = now;
+      if (quietSince !== null && now - quietSince >= idleMs) {
+        finish(resolve, { inflight: n });
+      } else if (now >= deadline) {
+        finish(
+          reject,
+          new Error(
+            `Timed out: the network never stayed idle (at most ${maxInflight} request(s) in flight for ${idleMs} ms) (after ${now - t0} ms; ${n} request(s) in flight now)`
+          )
+        );
+      }
+    }
+    if (signal) {
+      if (signal.aborted) {
+        finish(reject, cancelledError());
+        return;
+      }
+      onAbort = () => finish(reject, cancelledError());
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
+    set.add(check);
+    timer = setInterval(check, 50);
+    check();
+  });
+}
+
 // Request headers (Fetch.requestPaused: object) + route headers -> HeaderEntry[]
 // with case-insensitive overrides (continueRequest `headers` replaces the set).
 function mergeRequestHeaders(reqHeaders, extra) {
@@ -1280,6 +2317,13 @@ function mergeRequestHeaders(reqHeaders, extra) {
   return out;
 }
 
+// Spy data (request records with POST bodies, response bodies) is recorded
+// only while network_bodies (and the network_requests it requires) is allowed
+// and a paired bridge is connected; mock routes keep applying regardless.
+function spyCaptureAllowed() {
+  return permsLoaded && bridgePaired() && isAllowed("network_bodies") && isAllowed("network_requests");
+}
+
 // ---------- Fetch mock sessions (debugger events) ----------
 chrome.debugger.onEvent.addListener((source, method, params) => {
   const sess = fetchSessions.get(source.tabId);
@@ -1297,7 +2341,7 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
   }
   if (method === "Network.loadingFinished" && sess) {
     const meta = sess.netmap.get(params.requestId);
-    if (meta && meta.url && !meta.url.startsWith("data:")) {
+    if (meta && meta.url && !meta.url.startsWith("data:") && spyCaptureAllowed()) {
       cdpSend({ tabId: source.tabId }, "Network.getResponseBody", { requestId: params.requestId })
         .then((b) => {
           const body = b.body || "";
@@ -1324,18 +2368,20 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
   const route = sess.routes.find((r) => wildcardMatch(r.pattern, url));
   if (!route) {
     // Spy mode: record full request (incl. POST body), then let it through.
-    try {
-      const req = params.request || {};
-      push(sess.bodies, {
-        url,
-        method: req.method || "GET",
-        kind: "request",
-        headers: req.headers || {},
-        postData: (req.postData || "").slice(0, 50000),
-        ts: Date.now(),
-      });
-      if (sess.bodies.length > 200) sess.bodies.splice(0, sess.bodies.length - 200);
-    } catch {}
+    if (spyCaptureAllowed()) {
+      try {
+        const req = params.request || {};
+        push(sess.bodies, {
+          url,
+          method: req.method || "GET",
+          kind: "request",
+          headers: req.headers || {},
+          postData: (req.postData || "").slice(0, 50000),
+          ts: Date.now(),
+        });
+        if (sess.bodies.length > 200) sess.bodies.splice(0, sess.bodies.length - 200);
+      } catch {}
+    }
     cont();
     return;
   }
@@ -1395,32 +2441,34 @@ chrome.debugger.onDetach.addListener((source) => {
     st.attached = false;
     st.holders.clear();
   }
-  fetchSessions.delete(tabId);
-  emulationSessions.delete(tabId);
-  throttleSessions.delete(tabId);
-  headerSessions.delete(tabId);
-  saveMockSessions();
+  forgetDebugSessions(tabId);
+  saveDebugTabs();
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
-  const hadMock = fetchSessions.delete(tabId);
-  emulationSessions.delete(tabId);
-  throttleSessions.delete(tabId);
-  headerSessions.delete(tabId);
-  dbgTabs.delete(tabId);
+  forgetDebugSessions(tabId);
+  const hadDbg = dbgTabs.delete(tabId);
   eventRate.delete(tabId);
-  if (hadMock) saveMockSessions();
+  tabTouch.delete(tabId);
+  if (hadDbg) saveDebugTabs();
   const a = agentTabs.delete(tabId);
   const b = stickyFrames.delete(tabId);
-  if (a || b) saveSessionState();
+  const c = fallbackTabs.delete(tabId);
+  if (a || b || c) saveSessionState();
 });
 
-// Prerender / instant swaps replace the tab id: keep agent status.
+// Prerender / instant swaps replace the tab id: keep agent (or fallback) status.
 if (chrome.tabs.onReplaced) {
   chrome.tabs.onReplaced.addListener((addedTabId, removedTabId) => {
     stickyFrames.delete(removedTabId);
+    const fallbackOrigin = fallbackTabs.get(removedTabId);
+    const wasFallback = fallbackTabs.delete(removedTabId);
     if (agentTabs.delete(removedTabId)) {
       agentTabs.add(addedTabId);
+      saveSessionState();
+      installPageHooks(addedTabId);
+    } else if (wasFallback) {
+      if (!agentTabs.has(addedTabId)) fallbackTabs.set(addedTabId, fallbackOrigin);
       saveSessionState();
       installPageHooks(addedTabId);
     }
@@ -1448,9 +2496,44 @@ const PERM_CATS = [
   { id: "clipboard", title: "Clipboard", actions: ["clipboard_read", "clipboard_write"] },
   { id: "browsing_data", title: "Browsing Data", actions: ["browsing_data_clear"] },
   { id: "notifications", title: "Notifications", actions: ["notification_create", "notification_clear"] },
-  { id: "system", title: "System", actions: ["page_metrics", "permissions_grant", "emulation_geolocation", "emulation_geolocation_clear", "history_search", "history_delete"] },
+  { id: "emulation", title: "Emulation", actions: ["emulation_geolocation", "emulation_geolocation_clear", "emulation_viewport", "emulation_media", "emulation_cpu", "emulation_reset"] },
+  { id: "performance", title: "Performance", actions: ["page_metrics", "perf_web_vitals", "perf_trace_start", "perf_trace_stop", "perf_trace_chunk"] },
+  { id: "system", title: "System", actions: ["permissions_grant", "history_search", "history_delete"] },
 ];
 const PERM_ALL = PERM_CATS.flatMap((c) => c.actions);
+const PERM_ALL_SET = new Set(PERM_ALL);
+
+// Routed actions outside the catalog. The gate in handleCommand is an
+// allow-list: an action that is neither in PERM_ALL (after normalizeAction)
+// nor here is refused, so a handler added without a catalog entry can never
+// bypass the popup switches. perm_list / perm_set manage the switches
+// themselves and skip the permission check (UNGATED_ACTIONS); tab_list is the
+// MCP tool name of tabs_list and is gated as tabs_list. (__ping / __cancel are
+// content-script commands, never bridge actions.)
+const INTERNAL_ACTIONS = new Set(["perm_list", "perm_set", "tab_list"]);
+const UNGATED_ACTIONS = new Set(["perm_list", "perm_set"]);
+
+// The action catalog of 0.3.5, the last release that did not store
+// mcpKnownActions: an upgrade from it treats exactly these as known.
+const KNOWN_ACTIONS_0_3_5 = [
+  "tabs_list", "tab_create", "tab_duplicate", "tab_close", "tab_activate", "tab_navigate", "tab_reload", "tab_back",
+  "tab_forward", "tab_pin", "tab_mute", "window_list", "window_create", "window_focus", "browser_close", "frame_list",
+  "frame_focus", "frame_clear", "tab_group_create", "tab_group_list", "tab_group_update", "tab_group_ungroup",
+  "page_snapshot", "page_html", "page_text", "dom_query", "page_find", "page_wait", "page_axtree", "dom_click",
+  "dom_type", "dom_fill", "dom_select", "dom_check", "dom_hover", "dom_focus", "dom_scroll", "dom_drag", "dom_upload",
+  "keyboard_press", "page_screenshot", "page_pdf", "tab_audio_record_start", "tab_audio_record_stop", "console_get",
+  "console_clear", "network_requests", "network_clear", "network_response_body", "network_bodies", "network_throttle",
+  "network_set_headers", "har_export", "network_mock_start", "network_mock_stop", "network_mock_route",
+  "network_mock_list", "network_mock_remove", "network_mock_clear", "downloads_list", "downloads_pause",
+  "downloads_resume", "downloads_cancel", "downloads_erase", "bookmarks_search", "bookmarks_list", "bookmarks_add",
+  "bookmarks_remove", "cookies_list", "cookies_get", "cookies_set", "cookies_delete", "cookies_clear",
+  "cookies_export", "cookies_import", "storage_get", "storage_set", "idb_list", "idb_stores", "idb_read", "idb_count",
+  "idb_put", "idb_delete", "idb_clear", "sessions_recently_closed", "sessions_restore", "session_state_save",
+  "session_state_load", "dialog_policy", "dialog_get", "dialog_clear", "js_evaluate", "cdp_send", "trusted_click",
+  "trusted_type", "trusted_key", "trusted_scroll", "trusted_drag", "clipboard_read", "clipboard_write",
+  "browsing_data_clear", "notification_create", "notification_clear", "page_metrics", "permissions_grant",
+  "emulation_geolocation", "emulation_geolocation_clear", "history_search", "history_delete",
+];
 
 // Composite actions reach data guarded by other switches: every listed
 // action must be enabled as well (checked in the handleCommand gate).
@@ -1479,15 +2562,40 @@ function resolvePermNames(name) {
   return PERM_ALIASES[name] ? PERM_ALIASES[name].slice() : [];
 }
 
-// Disabled actions (default: all enabled). Persisted in chrome.storage.local.
+// Disabled actions (default: all enabled). Persisted in chrome.storage.local
+// "mcpDisabled", next to "mcpKnownActions" (the catalog the user last saw).
 let disabledActions = new Set();
 let permsLoaded = false;
 
 async function loadPerms() {
   try {
-    const got = await chrome.storage.local.get("mcpDisabled");
+    const got = await chrome.storage.local.get(["mcpDisabled", "mcpKnownActions"]);
     const arr = got && got.mcpDisabled;
-    if (Array.isArray(arr)) disabledActions = new Set(arr.filter((a) => PERM_ALL.includes(a)));
+    const next = new Set(Array.isArray(arr) ? arr.filter((a) => PERM_ALL_SET.has(a)) : []);
+    const storedKnown = got && got.mcpKnownActions;
+    const known = new Set(Array.isArray(storedKnown) ? storedKnown.filter((a) => typeof a === "string") : KNOWN_ACTIONS_0_3_5);
+    // Actions new since the last run start disabled when the user had
+    // switched off every previously known action of their category (a
+    // category turned off stays off after an update adds to it).
+    let added = false;
+    for (const c of PERM_CATS) {
+      const prev = c.actions.filter((a) => known.has(a));
+      const fresh = c.actions.filter((a) => !known.has(a));
+      if (!prev.length || !fresh.length || !prev.every((a) => next.has(a))) continue;
+      for (const a of fresh) next.add(a);
+      added = true;
+    }
+    disabledActions = next;
+    const knownChanged = !Array.isArray(storedKnown) || storedKnown.length !== PERM_ALL.length || PERM_ALL.some((a) => !known.has(a));
+    if (added || knownChanged) {
+      // One write: the new disabled set never lands without the catalog it was computed for.
+      const write = { mcpKnownActions: PERM_ALL.slice() };
+      if (added) {
+        write.mcpDisabled = Array.from(next);
+        noteOwnPermWrite(write.mcpDisabled);
+      }
+      await chrome.storage.local.set(write);
+    }
   } catch {}
   permsLoaded = true;
 }
@@ -1520,11 +2628,15 @@ function takeOwnPermWrite(value) {
   return true;
 }
 
-async function savePerms() {
-  const v = Array.from(disabledActions);
+function noteOwnPermWrite(v) {
   const now = Date.now();
   pruneOwnPermWrites(now);
   ownPermWrites.push({ key: JSON.stringify(v), at: now });
+}
+
+async function savePerms() {
+  const v = Array.from(disabledActions);
+  noteOwnPermWrite(v);
   try {
     await chrome.storage.local.set({ mcpDisabled: v });
   } catch {}
@@ -1534,15 +2646,21 @@ function isAllowed(action) {
   return !disabledActions.has(normalizeAction(action));
 }
 
-// Single entry point for permission changes: emits a `perms` event and
-// refreshes the agent-tab hooks whenever the set actually changes.
+// Single entry point for permission changes: emits a `perms` event,
+// refreshes the agent-tab hooks whenever the set actually changes, and tears
+// down the debugger-backed sessions whose controlling action was just
+// switched off (an offline throttle or a block route must not outlive it).
 function setDisabled(next, persist) {
-  const changed = next.size !== disabledActions.size || Array.from(next).some((a) => !disabledActions.has(a));
+  const newlyOff = new Set(Array.from(next).filter((a) => !disabledActions.has(a)));
+  const changed = next.size !== disabledActions.size || newlyOff.size > 0;
   disabledActions = next;
   if (persist) savePerms();
   if (changed) {
     sendPermsEvent();
     refreshAgentHooks();
+  }
+  if (newlyOff.size) {
+    teardownDebugSessions((k) => k.actions.some((a) => newlyOff.has(a))).catch(() => {});
   }
 }
 
@@ -1612,11 +2730,13 @@ function isOwnContentScript(sender) {
 
 // Re-validates relayed MAIN-world hook entries: whitelisted fields, capped
 // strings, and url/tabId/frameId/ts taken from the sender, not the page.
-// Hooks live only in the main frame of agent tabs.
+// Hooks live only in the main frame of agent tabs; fallback tabs carry only
+// the console hook, so dialog entries from them are dropped.
 function onPageEvent(type, entry, sender) {
   if (!permsLoaded || !stateLoaded) return;
   const tabId = sender.tab.id;
-  if (sender.frameId !== 0 || !agentTabs.has(tabId)) return;
+  const full = agentTabs.has(tabId);
+  if (sender.frameId !== 0 || !(full || fallbackTabs.has(tabId))) return;
   if (!entry || typeof entry !== "object" || Array.isArray(entry)) return;
   if (!rateOk(tabId)) return;
   const url = capStr(sender.url || sender.tab.url || "", 2048);
@@ -1632,7 +2752,7 @@ function onPageEvent(type, entry, sender) {
     });
     return;
   }
-  if (!eventAllowed("dialog") || !DIALOG_KINDS.has(entry.kind)) return;
+  if (!full || !eventAllowed("dialog") || !DIALOG_KINDS.has(entry.kind)) return;
   const r = entry.response;
   push(dialogEvents, {
     kind: entry.kind,
@@ -1654,10 +2774,25 @@ function statusPayload(t) {
     extensionId: chrome.runtime.id,
     paired: connected && paired,
     lastClose,
+    pairState,
+    serverVersion: serverInfo.version,
+    serverProtocol: serverInfo.protocol,
+    serverPid: serverInfo.pid,
+    hasKey: !!pairing.key,
   };
 }
 
-const PRIVILEGED_MSGS = new Set(["mcp-status", "mcp-history-get", "mcp-history-clear", "mcp-port-get", "mcp-port-set", "mcp-perms-get", "mcp-perms-set"]);
+const PRIVILEGED_MSGS = new Set([
+  "mcp-status",
+  "mcp-history-get",
+  "mcp-history-clear",
+  "mcp-port-get",
+  "mcp-port-set",
+  "mcp-perms-get",
+  "mcp-perms-set",
+  "mcp-repair",
+  "mcp-forget-pairing",
+]);
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || typeof msg !== "object" || typeof msg.type !== "string") return false;
@@ -1667,10 +2802,37 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (!PRIVILEGED_MSGS.has(msg.type) || !isExtensionPage(sender)) return false;
   if (msg.type === "mcp-status") {
-    chrome.tabs
-      .query({ active: true, lastFocusedWindow: true })
+    pairingReady
+      .catch(() => {})
+      .then(() => chrome.tabs.query({ active: true, lastFocusedWindow: true }))
       .then(([t]) => sendResponse(statusPayload(t)))
       .catch(() => sendResponse(statusPayload(null)));
+    return true;
+  }
+  if (msg.type === "mcp-repair") {
+    // Re-pair: the next "pair" offer within 2 minutes replaces the stored
+    // key; reconnect now so a waiting server makes the offer at once.
+    pairingReady
+      .catch(() => {})
+      .then(() => {
+        setAcceptPairUntil(Date.now() + ACCEPT_PAIR_MS);
+        reconnectNow();
+        sendResponse({ ok: true });
+      });
+    return true;
+  }
+  if (msg.type === "mcp-forget-pairing") {
+    // Deletes the key (the installId stays) and reconnects.
+    pairingReady
+      .catch(() => {})
+      .then(async () => {
+        pairing = { installId: pairing.installId, key: null };
+        try {
+          await savePairing();
+        } catch {}
+        reconnectNow();
+        sendResponse({ ok: true });
+      });
     return true;
   }
   if (msg.type === "mcp-history-get") {
@@ -1737,18 +2899,10 @@ function bg2bDeadline(ctx) {
 // Sends one content command to the TOP frame (frameId 0), ignoring any
 // frame_focus target: session state and response refetches belong to the
 // page's own origin. The caller runs ensureContent(tabId, 0) first.
-async function bg2bTopFrameSend(tabId, cmd, payload, deadline) {
+async function bg2bTopFrameSend(tabId, cmd, payload, deadline, signal) {
   const wait = Math.max(2000, deadline - Date.now());
-  let timer = null;
-  const timeout = new Promise((_, rej) => {
-    timer = setTimeout(() => rej(new Error(`Content did not respond (${cmd})`)), wait);
-  });
-  try {
-    const value = await Promise.race([chrome.tabs.sendMessage(tabId, { __mcp: 1, cmd, payload }, { frameId: 0 }), timeout]);
-    return { tabId, frameId: 0, value };
-  } finally {
-    clearTimeout(timer);
-  }
+  const value = await contentRequest(tabId, 0, cmd, payload, wait, signal);
+  return { tabId, frameId: 0, value };
 }
 
 // http(s) origin of a URL, or "" (opaque / unparsable / other schemes).
@@ -1756,6 +2910,23 @@ function bg2bHttpOrigin(url) {
   try {
     const u = new URL(String(url || ""));
     return u.protocol === "http:" || u.protocol === "https:" ? u.origin : "";
+  } catch {
+    return "";
+  }
+}
+
+// permissions_grant: content-setting values the tool may set.
+const PERMISSION_SETTINGS = new Set(["allow", "block", "ask"]);
+
+// One exact http(s) origin ("https://example.com", "http://localhost:3000"),
+// or "" for anything else: wildcards, patterns, paths, userinfo, other schemes
+// and non-canonical spellings all fail new URL(o).origin === o.
+function exactHttpOrigin(o) {
+  if (typeof o !== "string" || !o || o.includes("*")) return "";
+  try {
+    const u = new URL(o);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return "";
+    return u.origin === o ? o : "";
   } catch {
     return "";
   }
@@ -2046,7 +3217,7 @@ async function bg2bOffscreen(msg, what) {
 }
 
 // ---------- BG2a helpers: URLs, page_wait, trusted input, keys, AX tree, clipboard ----------
-const bg2aSleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const bg2aSleep = (ms, signal) => abortableSleep(ms, signal);
 const bg2aHas = (obj, k) => typeof k === "string" && Object.prototype.hasOwnProperty.call(obj, k);
 const bg2aNoHash = (u) => String(u || "").split("#")[0];
 
@@ -2106,8 +3277,13 @@ function bg2aIsNavError(e) {
 // URL / readyState conditions are checked here against the tab, so they
 // survive full navigations; selector / text conditions run in the targeted
 // frame's content script and are re-issued against the new document when a
-// navigation tears the old one down mid-wait. A pure duration wait sleeps here.
+// navigation tears the old one down mid-wait. networkIdle is tracked here
+// (netWaitIdle). Every given condition must hold at the same time: after the
+// network went idle the URL / DOM conditions are checked once more, and the
+// wait starts over when one of them no longer holds. A pure duration wait
+// sleeps here. ctx.signal (cancel) stops every sleep and the content wait.
 async function bg2aPageWait(tabId, payload, ctx) {
+  const signal = ctx && ctx.signal;
   const t0 = Date.now();
   const timeout = Math.min(Math.max(Number(payload.timeoutMs) || 15000, 0), 7200000);
   const serverMs = ctx && Number.isFinite(ctx.timeoutMs) && ctx.timeoutMs > 0 ? Math.max(1000, ctx.timeoutMs - 1500) : Infinity;
@@ -2122,48 +3298,923 @@ async function bg2aPageWait(tabId, payload, ctx) {
   }
   const rs = payload.readyState || "";
   if (rs && !bg2aHas(BG2A_READY_RANK, rs)) throw new Error(`Invalid readyState: ${rs} (use loading, interactive or complete)`);
+  const net = bg2cNetIdleSpec(payload);
   const urlSub = payload.url ? String(payload.url) : "";
   const navCond = !!(urlSub || re || rs);
   const domCond = !!(payload.selector || payload.text);
   let lastUrl = "";
   const timedOut = () =>
     new Error(`Timed out: expected condition never appeared (after ${Date.now() - t0} ms)${lastUrl ? `; current URL: ${capStr(lastUrl, 300)}` : ""}`);
-  if (!navCond && !domCond) {
-    await bg2aSleep(Math.max(0, deadline - Date.now()));
+  if (!navCond && !domCond && !net) {
+    await bg2aSleep(Math.max(0, deadline - Date.now()), signal);
     return { tabId, ok: true, waitedMs: Date.now() - t0 };
   }
+  const navOk = async () => {
+    const st = await bg2aTabState(tabId, rs);
+    lastUrl = st.url;
+    const ok =
+      (!urlSub || st.url.includes(urlSub)) &&
+      (!re || re.test(st.url)) &&
+      (!rs || BG2A_READY_RANK[st.ready] >= BG2A_READY_RANK[rs]);
+    return ok ? st.url : null;
+  };
   for (;;) {
+    throwIfAborted(signal);
+    let url = null;
     if (navCond) {
-      const st = await bg2aTabState(tabId, rs);
-      lastUrl = st.url;
-      const ok =
-        (!urlSub || st.url.includes(urlSub)) &&
-        (!re || re.test(st.url)) &&
-        (!rs || BG2A_READY_RANK[st.ready] >= BG2A_READY_RANK[rs]);
-      if (!ok) {
+      url = await navOk();
+      if (url === null) {
         if (Date.now() >= deadline) throw timedOut();
-        await bg2aSleep(Math.min(150, Math.max(0, deadline - Date.now())));
+        await bg2aSleep(Math.min(150, Math.max(0, deadline - Date.now())), signal);
         continue;
       }
-      if (!domCond) return { tabId, ok: true, waitedMs: Date.now() - t0, url: st.url };
+      if (!domCond && !net) return { tabId, ok: true, waitedMs: Date.now() - t0, url };
     }
-    const remaining = deadline - Date.now();
-    if (remaining <= 0) throw timedOut();
+    let dom = null;
+    if (domCond) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw timedOut();
+      try {
+        const r = await toContent(
+          tabId,
+          "page_wait",
+          { selector: payload.selector, text: payload.text, timeoutMs: Math.max(1, remaining) },
+          remaining + 3000,
+          ctx
+        );
+        const v = unwrap(r);
+        dom = v && typeof v === "object" ? v : {};
+      } catch (e) {
+        throwIfAborted(signal);
+        if (/^Timed out/.test(String(e && e.message))) throw timedOut();
+        if (!bg2aIsNavError(e) || deadline - Date.now() < 250) throw e;
+        await bg2aSleep(250, signal); // let the next document commit, then wait on it
+        continue;
+      }
+      if (!net) return Object.assign({ tabId }, dom, { ok: true, waitedMs: Date.now() - t0 });
+    }
+    const idle = await netWaitIdle(tabId, net.idleMs, net.maxInflight, deadline, signal, t0);
+    // The other conditions must still hold now that the network is idle.
+    let still = true;
+    if (navCond) {
+      url = await navOk();
+      still = url !== null;
+    }
+    if (still && domCond) still = await bg2cDomProbe(tabId, payload, ctx);
+    if (still) {
+      const out = Object.assign({ tabId }, dom || {}, { ok: true, waitedMs: Date.now() - t0, inflight: idle.inflight });
+      if (url) out.url = url;
+      return out;
+    }
+    if (Date.now() >= deadline) throw timedOut();
+    await bg2aSleep(Math.min(100, Math.max(0, deadline - Date.now())), signal);
+  }
+}
+
+// page_wait networkIdle options: null unless networkIdle is true.
+function bg2cNetIdleSpec(payload) {
+  const on = payload.networkIdle;
+  if (on === undefined || on === null || on === false) return null;
+  if (on !== true) throw new Error(`Invalid networkIdle: ${bg2cFmt(on)} (use true or false)`);
+  return {
+    idleMs: bg2cInt(payload, "idleMs", 0, 600000, 500),
+    maxInflight: bg2cInt(payload, "maxInflight", 0, 1000, 0),
+  };
+}
+
+// One immediate check of the selector / text condition in the targeted frame
+// (no waiting). A document going away counts as "does not hold".
+async function bg2cDomProbe(tabId, payload, ctx) {
+  try {
+    // timeoutMs 1: a content script without "probe" support answers within ~1 ms.
+    const r = await toContent(tabId, "page_wait", { selector: payload.selector, text: payload.text, probe: true, timeoutMs: 1 }, undefined, ctx);
+    const v = unwrap(r);
+    return !(v && v.ok === false);
+  } catch (e) {
+    throwIfAborted(ctx && ctx.signal);
+    if (/^Timed out/.test(String(e && e.message)) || bg2aIsNavError(e)) return false;
+    throw e;
+  }
+}
+
+// ----- payload validation (wave-2 handlers) -----
+function bg2cFmt(v) {
+  let s;
+  try {
+    s = JSON.stringify(v);
+  } catch {}
+  return capStr(s === undefined ? String(v) : s, 60);
+}
+
+// Integer field; def === undefined makes it required.
+function bg2cInt(payload, key, min, max, def) {
+  const v = payload[key];
+  if (v === undefined || v === null) {
+    if (def === undefined) throw new Error(`${key} is required (an integer from ${min} to ${max})`);
+    return def;
+  }
+  if (typeof v !== "number" || !Number.isInteger(v) || v < min || v > max) {
+    throw new Error(`Invalid ${key}: ${bg2cFmt(v)} (an integer from ${min} to ${max})`);
+  }
+  return v;
+}
+
+function bg2cNum(payload, key, min, max, def) {
+  const v = payload[key];
+  if (v === undefined || v === null) {
+    if (def === undefined) throw new Error(`${key} is required (a number from ${min} to ${max})`);
+    return def;
+  }
+  if (typeof v !== "number" || !Number.isFinite(v) || v < min || v > max) {
+    throw new Error(`Invalid ${key}: ${bg2cFmt(v)} (a number from ${min} to ${max})`);
+  }
+  return v;
+}
+
+function bg2cBool(payload, key, def) {
+  const v = payload[key];
+  if (v === undefined || v === null) return def;
+  if (typeof v !== "boolean") throw new Error(`Invalid ${key}: ${bg2cFmt(v)} (true or false)`);
+  return v;
+}
+
+function bg2cEnum(payload, key, allowed) {
+  const v = payload[key];
+  if (v === undefined || v === null) return undefined;
+  if (typeof v !== "string" || !allowed.includes(v)) throw new Error(`Invalid ${key}: ${bg2cFmt(v)} (use ${allowed.join(", ")})`);
+  return v;
+}
+
+// Absolute deadline inside the server-side timeout of the command.
+function bg2cDeadline(ctx, fallbackMs) {
+  const t = ctx && Number.isFinite(ctx.timeoutMs) && ctx.timeoutMs > 0 ? Math.max(1000, ctx.timeoutMs - 1500) : fallbackMs;
+  return Date.now() + t;
+}
+
+// Settles with p, or rejects at the deadline / on cancel (p keeps running).
+function bg2cRace(p, deadline, signal, timeoutMessage) {
+  return new Promise((resolve, reject) => {
+    let timer = null;
+    let onAbort = null;
+    const done = (fn, v) => {
+      clearTimeout(timer);
+      if (onAbort) signal.removeEventListener("abort", onAbort);
+      fn(v);
+    };
+    if (signal) {
+      if (signal.aborted) {
+        reject(cancelledError());
+        return;
+      }
+      onAbort = () => done(reject, cancelledError());
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
+    timer = setTimeout(() => done(reject, new Error(timeoutMessage)), Math.max(0, deadline - Date.now()));
+    Promise.resolve(p).then(
+      (v) => done(resolve, v),
+      (e) => done(reject, e)
+    );
+  });
+}
+
+// ----- emulation_* (persistent "emulation" holder, debugger-session registry) -----
+// Sets one emulation kind. The state is recorded only after CDP accepted it;
+// a failure on a tab without earlier state of this kind leaves no holder.
+async function bg2cApplyEmulation(tabId, sessions, state, apply) {
+  const had = sessions.has(tabId);
+  const dbg = await acquireDebugger(tabId, "emulation");
+  try {
+    await apply(dbg);
+  } catch (e) {
+    if (!had) await releaseHolderIfUnused(tabId, "emulation").catch(() => {});
+    throw e;
+  }
+  sessions.set(tabId, state);
+}
+
+// emulation_media payload key -> [allowed values, CSS media feature]
+const BG2C_MEDIA_FEATURES = {
+  colorScheme: [["light", "dark", "no-preference"], "prefers-color-scheme"],
+  reducedMotion: [["reduce", "no-preference"], "prefers-reduced-motion"],
+  forcedColors: [["active", "none"], "forced-colors"],
+};
+const BG2C_MEDIA_TYPES = ["screen", "print"];
+
+function bg2cMediaParams(state) {
+  const features = [];
+  for (const [key, [, name]] of Object.entries(BG2C_MEDIA_FEATURES)) {
+    if (state[key]) features.push({ name, value: state[key] });
+  }
+  return { media: state.media || "", features };
+}
+
+// ----- perf_web_vitals -----
+// Runs in the page's MAIN world (serialized: no outer references). Buffered
+// PerformanceObservers deliver what happened before the call; observeMs keeps
+// watching (interactions, late LCP candidates, layout shifts). Values are ms
+// from the navigation start (a prerender's activation subtracted); CLS uses
+// the web-vitals session windows (gaps < 1 s, windows <= 5 s), INP the worst
+// interaction (the 98th percentile from 50 interactions on). The page can
+// tamper with anything here: the background validates every value.
+async function bg2cWebVitalsMain(observeMs) {
+  const PO = typeof PerformanceObserver === "function" ? PerformanceObserver : null;
+  const supported = PO && Array.isArray(PO.supportedEntryTypes) ? PO.supportedEntryTypes.slice() : [];
+  const got = { "largest-contentful-paint": [], "layout-shift": [], event: [], "first-input": [], longtask: [], paint: [] };
+  const observers = [];
+  for (const type of Object.keys(got)) {
+    if (!supported.includes(type)) continue;
     try {
-      const r = await toContent(
-        tabId,
-        "page_wait",
-        { selector: payload.selector, text: payload.text, timeoutMs: Math.max(1, remaining) },
-        remaining + 3000
-      );
-      const v = unwrap(r);
-      return Object.assign({ tabId: r.tabId }, v && typeof v === "object" ? v : {}, { ok: true, waitedMs: Date.now() - t0 });
-    } catch (e) {
-      if (/^Timed out/.test(String(e && e.message))) throw timedOut();
-      if (!bg2aIsNavError(e) || deadline - Date.now() < 250) throw e;
-      await bg2aSleep(250); // let the next document commit, then wait on it
+      const o = new PO((list) => {
+        for (const e of list.getEntries()) got[type].push(e);
+      });
+      const opts = { type, buffered: true };
+      // (Chrome buffers event entries of 104 ms and more; new ones from 16 ms)
+      if (type === "event") opts.durationThreshold = 16;
+      o.observe(opts);
+      observers.push([type, o]);
+    } catch {}
+  }
+  await new Promise((r) => setTimeout(r, Math.max(100, observeMs)));
+  for (const [type, o] of observers) {
+    try {
+      for (const e of o.takeRecords()) got[type].push(e);
+    } catch {}
+    try {
+      o.disconnect();
+    } catch {}
+  }
+  const nav = /** @type {any} */ ((performance.getEntriesByType && performance.getEntriesByType("navigation")[0]) || null);
+  const act = nav && nav.activationStart > 0 ? nav.activationStart : 0;
+  const rel = (t) => (typeof t === "number" && t > 0 ? Math.max(t - act, 0) : null);
+  let fcp = null;
+  const paints = got.paint.length ? got.paint : performance.getEntriesByType ? performance.getEntriesByType("paint") : [];
+  for (const e of paints) if (e.name === "first-contentful-paint") fcp = rel(e.startTime);
+  const lcps = got["largest-contentful-paint"];
+  const lcp = lcps.length ? rel(lcps[lcps.length - 1].startTime) : null;
+  let cls = null;
+  if (supported.includes("layout-shift")) {
+    cls = 0;
+    let cur = 0;
+    let first = 0;
+    let prev = 0;
+    const shifts = got["layout-shift"].filter((e) => !e.hadRecentInput).sort((a, b) => a.startTime - b.startTime);
+    for (const e of shifts) {
+      if (cur > 0 && e.startTime - prev < 1000 && e.startTime - first < 5000) cur += e.value;
+      else {
+        cur = e.value;
+        first = e.startTime;
+      }
+      prev = e.startTime;
+      if (cur > cls) cls = cur;
     }
   }
+  const worst = new Map(); // interaction -> its slowest event
+  for (const e of got.event.concat(got["first-input"])) {
+    const key = e.interactionId || (e.entryType === "first-input" ? "first-input" : 0);
+    if (key) worst.set(key, Math.max(worst.get(key) || 0, e.duration));
+  }
+  const durs = Array.from(worst.values()).sort((a, b) => b - a);
+  const inp = durs.length ? durs[Math.min(durs.length - 1, Math.floor(durs.length / 50))] : null;
+  let longMs = 0;
+  for (const e of got.longtask) longMs += e.duration;
+  return {
+    url: String(location.href),
+    visibility: String(document.visibilityState),
+    supported: {
+      lcp: supported.includes("largest-contentful-paint"),
+      cls: supported.includes("layout-shift"),
+      inp: supported.includes("event"),
+      longtask: supported.includes("longtask"),
+    },
+    lcp,
+    fcp,
+    cls,
+    inp,
+    interactions: durs.length,
+    ttfb: nav ? rel(nav.responseStart) : null,
+    longTasks: { count: got.longtask.length, totalMs: longMs },
+    navigation: { domContentLoaded: nav ? rel(nav.domContentLoadedEventEnd) : null, load: nav ? rel(nav.loadEventEnd) : null },
+  };
+}
+
+// Reloads a tab; resolves true once its main frame finished loading, false
+// when the deadline came first. A main-frame load error rejects.
+function bg2cReloadAndWait(tabId, deadline, signal) {
+  const wn = chrome.webNavigation;
+  const events = !!(wn && wn.onCompleted && wn.onErrorOccurred);
+  return new Promise((resolve, reject) => {
+    let done = false;
+    let timer = null;
+    let poll = null;
+    let onAbort = null;
+    const onDone = (d) => {
+      if (d && d.tabId === tabId && d.frameId === 0) finish(resolve, true);
+    };
+    const onErr = (d) => {
+      // (ERR_ABORTED: replaced by another navigation, whose load still counts)
+      if (d && d.tabId === tabId && d.frameId === 0 && !/ERR_ABORTED/.test(String(d.error || ""))) {
+        finish(reject, new Error(`Reload failed: ${capStr(d.error, 200)}`));
+      }
+    };
+    function finish(fn, v) {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      clearInterval(poll);
+      if (events) {
+        wn.onCompleted.removeListener(onDone);
+        wn.onErrorOccurred.removeListener(onErr);
+      }
+      if (onAbort) signal.removeEventListener("abort", onAbort);
+      fn(v);
+    }
+    if (signal) {
+      if (signal.aborted) {
+        reject(cancelledError());
+        return;
+      }
+      onAbort = () => finish(reject, cancelledError());
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
+    if (events) {
+      wn.onCompleted.addListener(onDone);
+      wn.onErrorOccurred.addListener(onErr);
+    } else {
+      // No webNavigation events: poll the tab status (loading -> complete).
+      const started = Date.now();
+      let sawLoading = false;
+      poll = setInterval(() => {
+        chrome.tabs.get(tabId).then(
+          (t) => {
+            if (t.status !== "complete") sawLoading = true;
+            else if (sawLoading || Date.now() - started > 2000) finish(resolve, true);
+          },
+          (e) => finish(reject, e)
+        );
+      }, 100);
+    }
+    timer = setTimeout(() => finish(resolve, false), Math.max(0, deadline - Date.now()));
+    Promise.resolve(chrome.tabs.reload(tabId)).catch((e) => finish(reject, e));
+  });
+}
+
+// Resolves true once the tab has no uncommitted navigation (tab.pendingUrl),
+// false when the deadline comes first.
+async function bg2cWaitNavigationCommitted(tabId, deadline, signal) {
+  for (;;) {
+    throwIfAborted(signal);
+    const t = await chrome.tabs.get(tabId);
+    if (!t || !t.pendingUrl) return true;
+    if (Date.now() >= deadline) return false;
+    await bg2aSleep(Math.min(100, Math.max(0, deadline - Date.now())), signal);
+  }
+}
+
+// committed rejects when the tab's main frame commits a new document: a script
+// still running in the old one would never answer. dispose() stops watching.
+function bg2cWatchMainFrameCommit(tabId) {
+  const wn = chrome.webNavigation;
+  let listener = null;
+  const committed = new Promise((_, reject) => {
+    if (!wn || !wn.onCommitted) return;
+    listener = (d) => {
+      if (d && d.tabId === tabId && d.frameId === 0) {
+        reject(new Error('the page navigated during the measurement; wait for it to load (page_wait readyState: "complete") and measure again, or pass reload: true'));
+      }
+    };
+    wn.onCommitted.addListener(listener);
+  });
+  committed.catch(() => {});
+  return {
+    committed,
+    dispose: () => {
+      if (listener) wn.onCommitted.removeListener(listener);
+      listener = null;
+    },
+  };
+}
+
+async function bg2cWebVitals(tabId, payload, ctx) {
+  const signal = ctx && ctx.signal;
+  const t0 = Date.now();
+  const waitMs = bg2cInt(payload, "waitMs", 0, 30000, 0);
+  const reload = bg2cBool(payload, "reload", false);
+  const deadline = bg2cDeadline(ctx, 30000);
+  const notes = [];
+  throwIfAborted(signal);
+  if (reload) {
+    // The load wait leaves room for the observation window.
+    const loaded = await bg2cReloadAndWait(tabId, Math.max(t0 + 1000, deadline - waitMs - 2000), signal);
+    if (!loaded) notes.push("the reloaded page had not finished loading when the measurement started");
+  } else {
+    // tab_navigate returns as soon as the navigation starts: measure the
+    // document it brings, not the one it replaces (a script injected into a
+    // page that unloads never answers).
+    const committed = await bg2cWaitNavigationCommitted(tabId, Math.max(t0 + 1000, deadline - waitMs - 2000), signal);
+    if (!committed) notes.push("a navigation of the tab was still pending when the measurement started");
+  }
+  throwIfAborted(signal);
+  const observeMs = Math.max(0, Math.min(waitMs, deadline - Date.now() - 1500));
+  if (observeMs < waitMs) notes.push(`observed for ${observeMs} ms only (the command timeout is too short for waitMs)`);
+  let res;
+  const watch = bg2cWatchMainFrameCommit(tabId);
+  try {
+    const run = chrome.scripting.executeScript({
+      target: { tabId, frameIds: [0] },
+      world: "MAIN",
+      func: bg2cWebVitalsMain,
+      args: [observeMs],
+    });
+    res = await bg2cRace(Promise.race([run, watch.committed]), deadline, signal, "Timed out measuring web vitals (the page did not answer)");
+  } catch (e) {
+    throwIfAborted(signal);
+    const msg = String((e && e.message) || e);
+    if (/^Timed out/.test(msg)) throw e;
+    throw new Error(`Cannot measure web vitals in tab ${tabId}: ${capStr(msg, 300)}`);
+  } finally {
+    watch.dispose();
+  }
+  const v = res && res[0] && res[0].result;
+  if (!v || typeof v !== "object") throw new Error("The page navigated or closed during the measurement; try again");
+  const ms = (x) => (typeof x === "number" && Number.isFinite(x) && x >= 0 ? Math.round(x * 10) / 10 : null);
+  const obj = (x) => (x && typeof x === "object" ? x : {});
+  const sup = obj(v.supported);
+  const lt = obj(v.longTasks);
+  const nv = obj(v.navigation);
+  const out = {
+    tabId,
+    url: capStr(typeof v.url === "string" ? v.url : "", 2048),
+    lcp: ms(v.lcp),
+    fcp: ms(v.fcp),
+    cls: typeof v.cls === "number" && Number.isFinite(v.cls) && v.cls >= 0 ? Math.round(v.cls * 10000) / 10000 : null,
+    inp: ms(v.inp),
+    ttfb: ms(v.ttfb),
+    longTasks: { count: Number.isInteger(lt.count) && lt.count >= 0 ? lt.count : 0, totalMs: ms(lt.totalMs) ?? 0 },
+    navigation: { domContentLoaded: ms(nv.domContentLoaded), load: ms(nv.load) },
+    interactions: Number.isInteger(v.interactions) && v.interactions >= 0 ? v.interactions : 0,
+    observedMs: observeMs,
+    reloaded: reload,
+  };
+  if (out.lcp === null) {
+    notes.push(sup.lcp === false ? "lcp: not supported by this browser" : "lcp: no largest-contentful-paint entry (nothing painted yet, or the page loaded while hidden)");
+  }
+  if (out.fcp === null) notes.push("fcp: no first-contentful-paint yet (or the page loaded while hidden)");
+  if (out.cls === null) notes.push("cls: layout-shift entries are not supported by this browser");
+  if (out.inp === null) {
+    notes.push(
+      sup.inp === false
+        ? "inp: Event Timing is not supported by this browser"
+        : "inp: no interaction recorded (INP needs clicks, taps or key presses: interact with the page, then measure again or observe with waitMs)"
+    );
+  } else {
+    notes.push("inp: approximation from Event Timing; interactions before this call count only when they took 104 ms or more");
+  }
+  if (out.ttfb === null) notes.push("ttfb: no navigation timing for this document");
+  if (out.navigation.domContentLoaded === null) notes.push("navigation.domContentLoaded: not finished yet");
+  if (out.navigation.load === null) notes.push("navigation.load: the load event has not finished yet");
+  if (sup.longtask === false) notes.push("longTasks: not supported by this browser");
+  if (v.visibility === "hidden") notes.push("the tab is hidden: Chrome reports no paint metrics (fcp, lcp) for a document while it is hidden");
+  if (notes.length) out.note = notes.join("; ");
+  return out;
+}
+
+// ----- perf_trace_* (CDP Tracing on the persistent "perf" holder) -----
+// perf_trace_start reserves the tab, attaches and starts Tracing (transfer
+// mode ReportEvents). perf_trace_stop ends it, collects the
+// Tracing.dataCollected events into a JSON text {"traceEvents":[...]} kept as
+// chunks of at most PERF_TRACE_CHUNK_BYTES (UTF-8) under a random traceId,
+// and summarizes the main thread while the events stream in.
+// perf_trace_chunk hands out one chunk; a trace is dropped once every chunk
+// was read, after PERF_TRACE_TTL_MS, or when the service worker restarts.
+// A running trace is a "trace" kind in the debugger-session registry:
+// switching perf_trace_start / perf_trace_stop off, 30 s of bridge-down, a
+// detach or closing the tab ends it and discards its data.
+const PERF_TRACE_CATEGORIES = [
+  "devtools.timeline",
+  "disabled-by-default-devtools.timeline",
+  "v8.execute",
+  "blink.user_timing",
+  "loading",
+  "latencyInfo",
+];
+const PERF_TRACE_SCREENSHOTS = "disabled-by-default-devtools.screenshot";
+const PERF_TRACE_CATEGORY_RE = /^-?[\w.:*()-]{1,200}$/;
+
+// Categories that record page pixels or replayable paint data (filmstrip
+// screenshots, SkPicture / display-item dumps, layer snapshots): they reveal
+// page content like a screenshot does.
+const PERF_TRACE_PAGE_CONTENT = [
+  PERF_TRACE_SCREENSHOTS,
+  "disabled-by-default-devtools.timeline.picture",
+  "disabled-by-default-devtools.timeline.layers",
+  "disabled-by-default-devtools.timeline.paint",
+  "disabled-by-default-cc.debug.display_items",
+  "disabled-by-default-cc.debug.picture",
+  "disabled-by-default-cc.debug.quads",
+  "disabled-by-default-skia",
+  "disabled-by-default-skia.gpu",
+  "disabled-by-default-skia.picture",
+];
+const PERF_TRACE_PAGE_CONTENT_RE = /screenshot|picture|display_items|layers|skia|\.paint|cc\.debug/i;
+
+// True when an included category pattern can switch on a page-content
+// category: Chrome glob-matches "*" in disabled-by-default patterns
+// ("disabled-by-default-*", "disabled-by-default-devtools.*"), and an explicit
+// include wins over an exclusion, so excluding one is no guard. A bare "*"
+// never enables disabled-by-default categories. Deliberately broad: a pattern
+// matching a known name, or naming one of these kinds itself, counts.
+function traceIncludesScreenshots(included) {
+  return included.some((p) => {
+    if (p === "*") return false;
+    if (PERF_TRACE_PAGE_CONTENT_RE.test(p)) return true;
+    const re = new RegExp("^" + p.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*") + "$");
+    return PERF_TRACE_PAGE_CONTENT.some((name) => re.test(name));
+  });
+}
+const PERF_TRACE_CHUNK_BYTES = 4 * 1024 * 1024;
+const PERF_TRACE_MAX_BYTES = 200 * 1024 * 1024; // later events are dropped (droppedEvents)
+const PERF_TRACE_BUFFER_KB = 64 * 1024; // Chrome's trace buffer (recordUntilFull)
+const PERF_TRACE_TTL_MS = 5 * 60 * 1000;
+const PERF_TRACE_KEEP = 4; // finished traces held at once (the oldest is dropped)
+const PERF_TRACE_STORE_BYTES = 256 * 1024 * 1024; // and their total size (the newest always stays)
+const PERF_LONG_TASK_US = 50000;
+// Main-thread task events, preferred first (one name per thread is summed).
+const PERF_TASK_NAMES = ["RunTask", "ThreadControllerImpl::RunTask", "ThreadControllerImpl::DoWork"];
+const traceCollectors = new Map(); // tabId -> collector while perf_trace_stop collects
+const traceStore = new Map(); // traceId -> { tabId, chunks, bytes, read:Set<index>, timer }
+const lostTraceTabs = new Set(); // tabs whose trace a worker restart ended
+
+function saveTraceTabs() {
+  try {
+    Promise.resolve(chrome.storage.session.set({ mcpTraceTabs: Array.from(traceSessions.keys()) })).catch(() => {});
+  } catch {}
+}
+
+// A trace never survives a service-worker restart: the in-memory session is
+// gone, and the surviving attach is detached as a leftover (pendingRestore),
+// which ends Chrome's recording. The tabs are remembered only so that
+// perf_trace_stop can say so.
+const traceRestoreReady = (async () => {
+  try {
+    const got = await chrome.storage.session.get("mcpTraceTabs");
+    const tabs = got && got.mcpTraceTabs;
+    if (Array.isArray(tabs)) for (const t of tabs) if (Number.isInteger(t) && !traceSessions.has(t)) lostTraceTabs.add(t);
+  } catch {}
+  saveTraceTabs();
+})();
+
+// Registry hook (teardown, detach, tab closed): a stop still collecting on a
+// tab whose session is gone fails at once instead of at its timeout.
+function onTraceSessionsChanged() {
+  saveTraceTabs();
+  for (const [tabId, c] of traceCollectors) {
+    if (traceSessions.has(tabId)) continue;
+    traceCollectors.delete(tabId);
+    c.fail(new Error("The trace was discarded before its data arrived (debugger detached, tab closed, permission switched off or bridge down)"));
+  }
+}
+
+chrome.debugger.onEvent.addListener((source, method, params) => {
+  if (method !== "Tracing.dataCollected" && method !== "Tracing.tracingComplete") return;
+  const c = traceCollectors.get(source && source.tabId);
+  if (!c) return;
+  if (method === "Tracing.dataCollected") {
+    if (!c.discard) bg2cTraceAdd(c, params && params.value);
+  }
+  else c.complete(params);
+});
+
+function bg2cUtf8Len(s) {
+  return /^[\x00-\x7f]*$/.test(s) ? s.length : new TextEncoder().encode(s).length;
+}
+
+function bg2cTraceCollector() {
+  const c = {
+    eventCount: 0,
+    dropped: 0,
+    bytes: 0,
+    chunks: [],
+    cur: [],
+    curBytes: 0,
+    first: true,
+    minTs: Infinity,
+    maxTs: -Infinity,
+    threads: new Map(), // "pid:tid" -> { pid, tid, name, tasks: { [name]: { busy, longCount, long, lastEnd } } }
+    mainFrame: null,
+    mainPids: new Set(),
+  };
+  c.done = new Promise((resolve, reject) => {
+    c.complete = (p) => resolve(p || {});
+    c.fail = (e) => reject(e);
+  });
+  c.done.catch(() => {});
+  bg2cTraceWrite(c, '{"traceEvents":[');
+  return c;
+}
+
+function bg2cTraceFlush(c) {
+  if (!c.cur.length) return;
+  c.chunks.push(c.cur.join(""));
+  c.cur = [];
+  c.curBytes = 0;
+}
+
+// Appends JSON text: the chunks stay <= PERF_TRACE_CHUNK_BYTES (UTF-8) and
+// their concatenation is the trace file.
+function bg2cTraceWrite(c, s) {
+  const n = bg2cUtf8Len(s);
+  if (n > PERF_TRACE_CHUNK_BYTES) {
+    // One oversized piece: split it (at worst 3 UTF-8 bytes per UTF-16 unit),
+    // never between the halves of a surrogate pair.
+    const step = n === s.length ? PERF_TRACE_CHUNK_BYTES : Math.floor(PERF_TRACE_CHUNK_BYTES / 3);
+    for (let i = 0; i < s.length; ) {
+      let end = Math.min(s.length, i + step);
+      const code = s.charCodeAt(end - 1);
+      if (end < s.length && code >= 0xd800 && code <= 0xdbff) end--;
+      bg2cTraceWrite(c, s.slice(i, end));
+      i = end;
+    }
+    return;
+  }
+  if (c.curBytes + n > PERF_TRACE_CHUNK_BYTES) bg2cTraceFlush(c);
+  c.cur.push(s);
+  c.curBytes += n;
+  c.bytes += n;
+}
+
+function bg2cTraceAdd(c, events) {
+  if (!Array.isArray(events)) return;
+  for (const e of events) {
+    if (!e || typeof e !== "object") continue;
+    c.eventCount++;
+    bg2cTraceNote(c, e);
+    let s;
+    try {
+      s = JSON.stringify(e);
+    } catch {
+      c.dropped++;
+      continue;
+    }
+    if (c.bytes + s.length + 3 > PERF_TRACE_MAX_BYTES) {
+      c.dropped++;
+      continue;
+    }
+    bg2cTraceWrite(c, c.first ? s : "," + s);
+    c.first = false;
+  }
+}
+
+function bg2cTraceThread(c, pid, tid) {
+  const key = `${pid}:${tid}`;
+  let t = c.threads.get(key);
+  if (!t) c.threads.set(key, (t = { pid, tid, name: "", tasks: {} }));
+  return t;
+}
+
+// Summary bookkeeping per event: trace bounds, thread names, the main
+// frame's renderer process(es) and per-thread task time / long tasks.
+function bg2cTraceNote(c, e) {
+  const args = e.args && typeof e.args === "object" ? e.args : null;
+  if (e.ph === "M") {
+    if (e.name === "thread_name" && args) bg2cTraceThread(c, e.pid, e.tid).name = String(args.name || "");
+    return;
+  }
+  if (typeof e.ts === "number" && e.ts > 0) {
+    if (e.ts < c.minTs) c.minTs = e.ts;
+    const end = e.ts + (typeof e.dur === "number" && e.dur > 0 ? e.dur : 0);
+    if (end > c.maxTs) c.maxTs = end;
+  }
+  const data = args && args.data && typeof args.data === "object" ? args.data : null;
+  // A tab's trace holds only its renderer process(es) (site-isolated frames
+  // add more): events of the tab's main frame (its id is the tab's debugger
+  // target id) or of a main-frame commit mark the main frame's process.
+  if (data && e.pid !== undefined && ((c.mainFrame && data.frame === c.mainFrame) || data.isOutermostMainFrame === true)) c.mainPids.add(e.pid);
+  if (e.name === "TracingStartedInBrowser" && data && Array.isArray(data.frames)) {
+    const main = data.frames.find((f) => f && !f.parent);
+    if (main) {
+      c.mainFrame = main.frame;
+      if (Number.isInteger(main.processId)) c.mainPids.add(main.processId);
+    }
+  } else if (e.name === "FrameCommittedInBrowser" && data && c.mainFrame && data.frame === c.mainFrame && Number.isInteger(data.processId)) {
+    c.mainPids.add(data.processId); // a cross-process navigation of the main frame
+  } else if (e.ph === "X" && typeof e.dur === "number" && typeof e.ts === "number" && PERF_TASK_NAMES.includes(e.name)) {
+    const t = bg2cTraceThread(c, e.pid, e.tid);
+    const st = t.tasks[e.name] || (t.tasks[e.name] = { busy: 0, longCount: 0, long: [], lastEnd: -Infinity });
+    // (a task nested in one already counted adds no busy time)
+    if (e.ts >= st.lastEnd) {
+      st.busy += e.dur;
+      if (e.dur > PERF_LONG_TASK_US) {
+        st.longCount++;
+        st.long.push([e.ts, e.dur]);
+        if (st.long.length > 40) {
+          st.long.sort((a, b) => b[1] - a[1]);
+          st.long.length = 10;
+        }
+      }
+    }
+    st.lastEnd = Math.max(st.lastEnd, e.ts + e.dur);
+  }
+}
+
+function bg2cTraceSummary(c) {
+  const ms = (us) => Math.round(us / 100) / 10;
+  const stat = (t) => {
+    for (const n of PERF_TASK_NAMES) if (t.tasks[n]) return t.tasks[n];
+    return null;
+  };
+  const busyOf = (t) => (stat(t) ? stat(t).busy : 0);
+  const threads = Array.from(c.threads.values());
+  const renderers = threads.filter((t) => t.name === "CrRendererMain");
+  // The main frame's renderer main thread(s); else the busiest renderer main
+  // thread, else the busiest thread of the main frame's process.
+  let main = renderers.filter((t) => c.mainPids.has(t.pid));
+  if (!main.length && renderers.length) main = [renderers.reduce((a, b) => (busyOf(b) > busyOf(a) ? b : a))];
+  if (!main.length) {
+    const own = threads.filter((t) => c.mainPids.has(t.pid) && stat(t));
+    if (own.length) main = [own.reduce((a, b) => (busyOf(b) > busyOf(a) ? b : a))];
+  }
+  let busy = 0;
+  let longCount = 0;
+  const long = [];
+  for (const t of main) {
+    const st = stat(t);
+    if (!st) continue;
+    busy += st.busy;
+    longCount += st.longCount;
+    long.push(...st.long);
+  }
+  long.sort((a, b) => b[1] - a[1]);
+  const t0 = Number.isFinite(c.minTs) ? c.minTs : 0;
+  return {
+    durationMs: Number.isFinite(c.minTs) && c.maxTs > c.minTs ? ms(c.maxTs - c.minTs) : 0,
+    eventCount: c.eventCount,
+    longTasks: long.slice(0, 10).map(([ts, dur]) => ({ startMs: ms(ts - t0), durationMs: ms(dur) })),
+    longTaskCount: longCount,
+    mainThreadBusyMs: main.length ? ms(busy) : null,
+    mainThread: main.length ? main.map((t) => ({ pid: t.pid, tid: t.tid })) : null,
+  };
+}
+
+async function bg2cTraceStart(tabId, payload, ctx) {
+  await traceRestoreReady;
+  const signal = ctx && ctx.signal;
+  if (traceSessions.has(tabId)) throw new Error(`A trace is already running on tab ${tabId}; stop it with perf_trace_stop first`);
+  let cats = PERF_TRACE_CATEGORIES.slice();
+  const given = payload.categories;
+  if (given !== undefined && given !== null) {
+    if (!Array.isArray(given) || !given.length || given.length > 64 || !given.every((x) => typeof x === "string" && PERF_TRACE_CATEGORY_RE.test(x))) {
+      throw new Error("Invalid categories: a non-empty list of up to 64 trace category names (letters, digits, _ . : * ( ) -; a leading - excludes one)");
+    }
+    cats = Array.from(new Set(given));
+  }
+  if (bg2cBool(payload, "screenshots", false) && !cats.includes(PERF_TRACE_SCREENSHOTS)) cats.push(PERF_TRACE_SCREENSHOTS);
+  const included = cats.filter((x) => !x.startsWith("-"));
+  const excluded = cats.filter((x) => x.startsWith("-")).map((x) => x.slice(1)).filter(Boolean);
+  if (!included.length) throw new Error("Invalid categories: include at least one category");
+  // Filmstrip frames are page screenshots: they need the page_screenshot
+  // switch (Media) as well, like the REQUIRES rules of composite actions.
+  if (traceIncludesScreenshots(included) && !isAllowed("page_screenshot")) {
+    throw new Error("Permission disabled in extension: page_screenshot (required by perf_trace_start screenshots and paint-data categories; enable it from the extension popup)");
+  }
+  // Only the listed categories (Chrome would add its default ones otherwise).
+  if (!included.includes("*") && !excluded.includes("*")) excluded.push("*");
+  throwIfAborted(signal);
+  const st = { startedAt: Date.now(), categories: cats, collector: null };
+  traceSessions.set(tabId, st); // reserved: a concurrent second start is refused
+  const params = {
+    transferMode: "ReportEvents",
+    traceConfig: {
+      recordMode: "recordUntilFull",
+      traceBufferSizeInKb: PERF_TRACE_BUFFER_KB,
+      includedCategories: included,
+      excludedCategories: excluded,
+    },
+  };
+  try {
+    const dbg = await acquireDebugger(tabId, "perf");
+    try {
+      await cdpSend(dbg, "Tracing.start", params);
+    } catch (e) {
+      // A trace the previous service worker left running on an attach this
+      // worker adopted: end it (nobody reads its data) and start afresh.
+      if (!lostTraceTabs.has(tabId) || !/already/i.test(String((e && e.message) || e))) throw e;
+      const sink = { discard: true };
+      const ended = new Promise((resolve) => {
+        sink.complete = resolve;
+        sink.fail = resolve;
+      });
+      traceCollectors.set(tabId, sink);
+      try {
+        await cdpSend(dbg, "Tracing.end", {});
+        await bg2cRace(ended, Date.now() + 3000, signal, "Timed out ending the previous trace");
+      } catch {
+      } finally {
+        if (traceCollectors.get(tabId) === sink) traceCollectors.delete(tabId);
+      }
+      await cdpSend(dbg, "Tracing.start", params);
+    }
+  } catch (e) {
+    if (traceSessions.get(tabId) === st) traceSessions.delete(tabId);
+    await releaseHolderIfUnused(tabId, "perf").catch(() => {});
+    throw new Error(`Could not start tracing on tab ${tabId}: ${capStr((e && e.message) || e, 300)}`);
+  }
+  if (traceSessions.get(tabId) !== st) {
+    // Torn down while starting (permission switched off, tab closed).
+    throw new Error(`The trace on tab ${tabId} was ended while it started`);
+  }
+  if (signal && signal.aborted) {
+    await teardownDebugSession("trace", tabId).catch(() => {});
+    throw cancelledError();
+  }
+  lostTraceTabs.delete(tabId);
+  saveTraceTabs();
+  return { tabId, started: true, categories: cats };
+}
+
+async function bg2cTraceStop(tabId, ctx) {
+  await traceRestoreReady;
+  const signal = ctx && ctx.signal;
+  const st = traceSessions.get(tabId);
+  if (!st) {
+    if (lostTraceTabs.delete(tabId)) {
+      throw new Error(
+        `The trace on tab ${tabId} was lost: the extension's service worker restarted while it was recording (Chrome ends a trace together with its debugger session). Start a new one with perf_trace_start`
+      );
+    }
+    const others = Array.from(traceSessions.keys());
+    throw new Error(`No trace is running on tab ${tabId} (start one with perf_trace_start)${others.length ? `; running on tab ${others.join(", ")}` : ""}`);
+  }
+  if (st.collector) throw new Error(`The trace on tab ${tabId} is already being stopped`);
+  const c = bg2cTraceCollector();
+  st.collector = c;
+  traceCollectors.set(tabId, c);
+  const deadline = bg2cDeadline(ctx, 120000);
+  let done;
+  try {
+    // The tab's target id is its main frame id in the trace events.
+    try {
+      const t = ((await chrome.debugger.getTargets()) || []).find((x) => x && x.tabId === tabId && x.type === "page");
+      if (t && typeof t.id === "string") c.mainFrame = t.id;
+    } catch {}
+    // The data follows as Tracing.dataCollected events, then Tracing.tracingComplete.
+    try {
+      await cdpSend({ tabId }, "Tracing.end", {});
+    } catch (e) {
+      throw new Error(`Could not stop tracing on tab ${tabId}: ${capStr((e && e.message) || e, 300)}`);
+    }
+    done = await bg2cRace(c.done, deadline, signal, "Timed out collecting the trace data (give perf_trace_stop a longer timeout, or record a shorter trace)");
+  } catch (e) {
+    // Nothing usable: drop the session, its data and the holder.
+    if (traceCollectors.get(tabId) === c) traceCollectors.delete(tabId);
+    if (traceSessions.get(tabId) === st) await teardownDebugSession("trace", tabId).catch(() => {});
+    throw e;
+  }
+  traceCollectors.delete(tabId);
+  if (traceSessions.get(tabId) === st) traceSessions.delete(tabId);
+  saveTraceTabs();
+  await releaseHolderIfUnused(tabId, "perf").catch(() => {});
+  bg2cTraceWrite(c, "]}");
+  bg2cTraceFlush(c);
+  const traceId = bg2cStoreTrace(tabId, c.chunks, c.bytes);
+  const out = { tabId, traceId, size: c.bytes, chunks: c.chunks.length, summary: bg2cTraceSummary(c) };
+  if (done && done.dataLossOccurred) out.dataLossOccurred = true; // Chrome's buffer filled up
+  if (c.dropped) {
+    out.droppedEvents = c.dropped;
+    out.truncated = true;
+  }
+  return out;
+}
+
+function bg2cDropTrace(traceId) {
+  const e = traceStore.get(traceId);
+  if (!e) return;
+  clearTimeout(e.timer);
+  traceStore.delete(traceId);
+}
+
+function bg2cStoreTrace(tabId, chunks, bytes) {
+  const held = () => Array.from(traceStore.values()).reduce((n, e) => n + e.bytes, 0);
+  while (traceStore.size && (traceStore.size >= PERF_TRACE_KEEP || held() + bytes > PERF_TRACE_STORE_BYTES)) {
+    bg2cDropTrace(traceStore.keys().next().value);
+  }
+  const traceId = randomHex32().slice(0, 32);
+  traceStore.set(traceId, { tabId, chunks, bytes, read: new Set(), timer: setTimeout(() => bg2cDropTrace(traceId), PERF_TRACE_TTL_MS) });
+  return traceId;
+}
+
+// One chunk of a finished trace; the trace is dropped once every chunk was read.
+function bg2cTraceChunk(payload) {
+  const traceId = payload.traceId;
+  if (typeof traceId !== "string" || !/^[0-9a-f]{32}$/.test(traceId)) throw new Error(`Invalid traceId: ${bg2cFmt(traceId)}`);
+  const e = traceStore.get(traceId);
+  if (!e) {
+    throw new Error(`Unknown or expired traceId: ${traceId} (a trace is kept until every chunk was read, for 5 minutes at most, and not across an extension restart)`);
+  }
+  const index = bg2cInt(payload, "index", 0, e.chunks.length - 1);
+  e.read.add(index);
+  const out = { traceId, index, chunks: e.chunks.length, data: e.chunks[index] };
+  if (e.read.size >= e.chunks.length) bg2cDropTrace(traceId);
+  return out;
 }
 
 // ----- trusted input geometry (D7/F8) -----
@@ -2172,7 +4223,7 @@ async function bg2aPageWait(tabId, payload, ctx) {
 // text=, CSS) works. Returns { frameId, v } with v in that frame's viewport px.
 async function bg2aScrollTarget(tabId, selector, ctx) {
   if (selector === undefined || selector === null || String(selector).trim() === "") throw new Error("selector is required");
-  const r = await toContent(tabId, "scroll_into_view", { selector: String(selector) }, ctx && ctx.timeoutMs);
+  const r = await toContent(tabId, "scroll_into_view", { selector: String(selector) }, ctx && ctx.timeoutMs, ctx);
   const v = unwrap(r);
   if (!v || !Number.isFinite(v.cx) || !Number.isFinite(v.cy)) throw new Error(`Could not measure element: ${selector}`);
   if (!(v.width > 0 && v.height > 0)) throw new Error(`Element has no size (hidden or not rendered): ${selector}`);
@@ -2473,14 +4524,19 @@ async function bg2aOffscreenClipboard(msg) {
 }
 
 // ---------- command router ----------
-// ctx = { timeoutMs?: number } — the server-side timeout of this command.
-// Content commands pass it on: toContent(tabId, cmd, payload, ctx?.timeoutMs).
+// ctx = { timeoutMs?, signal?, touched?, mayNavigate? } (see runBridgeCommand):
+// the server-side timeout, the cancel signal and the fallback bookkeeping.
+// Content commands pass it on: toContent(tabId, cmd, payload, ctx?.timeoutMs, ctx).
 async function handleCommand(action, payload, tabId, ctx = {}) {
   await permsReady;
   await stateReady;
   payload = payload && typeof payload === "object" ? payload : {};
+  // Allow-list: only catalog actions and INTERNAL_ACTIONS are routed at all.
+  if (!PERM_ALL_SET.has(normalizeAction(action)) && !INTERNAL_ACTIONS.has(action)) {
+    throw new Error(`Unknown command: ${action}`);
+  }
   // Permission check (perm_list/perm_set are always allowed; perm_set can only disable)
-  if (action !== "perm_list" && action !== "perm_set") {
+  if (!UNGATED_ACTIONS.has(action)) {
     if (!isAllowed(action)) {
       throw new Error(`Permission disabled in extension: ${action} (enable it from the extension popup)`);
     }
@@ -2491,7 +4547,10 @@ async function handleCommand(action, payload, tabId, ctx = {}) {
     }
   }
   // An explicitly targeted tab is under automation from now on.
-  if (Number.isInteger(tabId) && tabId >= 0) markAgentTab(tabId);
+  if (Number.isInteger(tabId) && tabId >= 0) {
+    markAgentTab(tabId);
+    touchTab(ctx, tabId);
+  }
   switch (action) {
     case "perm_list": {
       return {
@@ -2527,12 +4586,12 @@ async function handleCommand(action, payload, tabId, ctx = {}) {
       return { id: t.id, url: t.pendingUrl || t.url || url };
     }
     case "tab_duplicate": {
-      const id = tabId ?? (await activeTabId());
+      const id = tabId ?? (await activeTabId(ctx));
       const dup = await chrome.tabs.duplicate(id);
       return { ok: true, tab: { id: dup.id, title: dup.title, url: dup.url, active: dup.active, windowId: dup.windowId } };
     }
     case "tab_close": {
-      const id = tabId ?? (await activeTabId());
+      const id = tabId ?? (await activeTabId(ctx));
       // Closing the last tab of the last window quits the browser:
       // treat it as browser_close for permission purposes.
       const allTabs = await chrome.tabs.query({});
@@ -2544,33 +4603,33 @@ async function handleCommand(action, payload, tabId, ctx = {}) {
       return { ok: true, closed: id };
     }
     case "tab_activate": {
-      const id = tabId ?? (await activeTabId());
+      const id = tabId ?? (await activeTabId(ctx));
       await chrome.tabs.update(id, { active: true });
       const t = await chrome.tabs.get(id);
       await chrome.windows.update(t.windowId, { focused: true });
       return { ok: true, id };
     }
     case "tab_navigate": {
-      const id = tabId ?? (await activeTabId());
+      const id = tabId ?? (await activeTabId(ctx));
       const url = bg2aNormalizeUrl(payload.url);
       if (!url) throw new Error("url is required");
       await chrome.tabs.update(id, { url });
       return { ok: true, id, url };
     }
     case "tab_reload": {
-      const id = tabId ?? (await activeTabId());
+      const id = tabId ?? (await activeTabId(ctx));
       await chrome.tabs.reload(id);
       return { ok: true, id };
     }
     case "tab_back": {
       // tabs.goBack also works on error pages, chrome:// pages and the PDF
       // viewer, where script injection is not allowed.
-      const id = tabId ?? (await activeTabId());
+      const id = tabId ?? (await activeTabId(ctx));
       await chrome.tabs.goBack(id);
       return { ok: true, id };
     }
     case "tab_forward": {
-      const id = tabId ?? (await activeTabId());
+      const id = tabId ?? (await activeTabId(ctx));
       await chrome.tabs.goForward(id);
       return { ok: true, id };
     }
@@ -2650,7 +4709,7 @@ async function handleCommand(action, payload, tabId, ctx = {}) {
     case "idb_put":
     case "idb_delete":
     case "idb_clear": {
-      const r = await toContent(tabId, action, payload, ctx && ctx.timeoutMs);
+      const r = await toContent(tabId, action, payload, ctx && ctx.timeoutMs, ctx);
       const v = unwrap(r);
       // string results (snapshot/html/text) pass through for AI readability
       if (typeof v === "string") return { tabId: r.tabId, text: v };
@@ -2661,7 +4720,7 @@ async function handleCommand(action, payload, tabId, ctx = {}) {
 
     case "page_wait": {
       // URL / readyState waits are tracked here so they survive navigations (E18).
-      const id = tabId ?? (await activeTabId());
+      const id = tabId ?? (await activeTabId(ctx));
       return await bg2aPageWait(id, payload, ctx);
     }
 
@@ -2669,7 +4728,7 @@ async function handleCommand(action, payload, tabId, ctx = {}) {
       // CSP-safe: evaluated via CDP Runtime.evaluate (trusted, bypasses both
       // page CSP and the extension's own script-src without unsafe-eval).
       // Never use eval/new Function here or in content.js.
-      const id = tabId ?? (await activeTabId());
+      const id = tabId ?? (await activeTabId(ctx));
       const expr = String(payload.expression ?? "");
       const awaitPromise = !!payload.awaitPromise;
       const out = await withDebugger(id, async (dbg) => {
@@ -2723,11 +4782,11 @@ async function handleCommand(action, payload, tabId, ctx = {}) {
     }
 
     case "page_screenshot": {
-      const id = tabId ?? (await activeTabId());
+      const id = tabId ?? (await activeTabId(ctx));
       await chrome.tabs.update(id, { active: true });
       const t = await chrome.tabs.get(id);
       await chrome.windows.update(t.windowId, { focused: true });
-      await new Promise((r) => setTimeout(r, 300));
+      await bg2aSleep(300, ctx && ctx.signal);
       if (payload.selector) {
         // Element screenshot: resolve box via CDP, capture clipped at full res.
         const sel = bg2aCdpSelector(payload.selector);
@@ -2792,12 +4851,32 @@ async function handleCommand(action, payload, tabId, ctx = {}) {
           fullHeight: shot.fullHeight,
         };
       }
-      const dataUrl = await chrome.tabs.captureVisibleTab(t.windowId, { format: "png" });
+      let dataUrl;
+      try {
+        dataUrl = await chrome.tabs.captureVisibleTab(t.windowId, { format: "png" });
+      } catch (first) {
+        // A window that was minimized or covered may not have repainted yet
+        // ("image readback failed"): try once more, then capture the viewport
+        // through the debugger.
+        await bg2aSleep(700, ctx && ctx.signal);
+        try {
+          dataUrl = await chrome.tabs.captureVisibleTab(t.windowId, { format: "png" });
+        } catch {
+          try {
+            const shot = await withDebugger(id, (dbg) => cdpSend(dbg, "Page.captureScreenshot", { format: "png" }));
+            dataUrl = `data:image/png;base64,${shot.data}`;
+          } catch (e) {
+            const a = capStr(String((first && first.message) || first), 200);
+            const b = capStr(String((e && e.message) || e), 200);
+            throw new Error(`Failed to capture tab ${id}: ${a} (debugger fallback: ${b})`);
+          }
+        }
+      }
       return { tabId: id, dataUrl, note: "visible-tab base64 dataUrl (the AI can view this image)" };
     }
 
     case "page_pdf": {
-      const id = tabId ?? (await activeTabId());
+      const id = tabId ?? (await activeTabId(ctx));
       const pdf = await withDebugger(id, async (dbg) => {
         return await cdpSend(dbg, "Page.printToPDF", { printBackground: true });
       });
@@ -2805,7 +4884,7 @@ async function handleCommand(action, payload, tabId, ctx = {}) {
     }
 
     case "tab_audio_record_start": {
-      const id = tabId ?? (await activeTabId());
+      const id = tabId ?? (await activeTabId(ctx));
       // Reuses the offscreen document: recordings of other tabs keep running.
       await ensureOffscreen();
       let streamId;
@@ -2814,6 +4893,7 @@ async function handleCommand(action, payload, tabId, ctx = {}) {
       } catch (err) {
         throw new Error(`Failed to get media stream for tab ${id}: ${err.message || err}`);
       }
+      throwIfAborted(ctx && ctx.signal);
       const res = await chrome.runtime.sendMessage({
         type: "mcp-offscreen-audio-start",
         streamId,
@@ -2823,14 +4903,32 @@ async function handleCommand(action, payload, tabId, ctx = {}) {
       if (!res || !res.ok) {
         throw new Error(res?.error || "Failed to start tab audio recording in offscreen document");
       }
+      // Cancelled while starting: the caller already got "cancelled" and will
+      // never send the stop, and an active recording has no time limit, so
+      // stop and release it here instead of leaving the tab recorded.
+      if (ctx && ctx.signal && ctx.signal.aborted) {
+        try {
+          await bg2bOffscreen({ type: "mcp-offscreen-audio-stop", tabId: id }, "stop the tab audio recording");
+          await chrome.runtime.sendMessage({ type: "mcp-offscreen-audio-release", tabId: id });
+        } catch {}
+        throw cancelledError();
+      }
       return { ok: true, tabId: id, recording: true, startedAt: res.startedAt, mimeType: res.mimeType };
     }
 
     case "tab_audio_record_stop": {
       await ensureOffscreen();
-      // Without tabId: the single active recording (never "whatever tab is
+      // payload.recordingTabId: the tab tab_audio_capture's own start returned
+      // (the agent named no tab). It only picks the recording to stop: as a
+      // payload field it never reaches the agent-tab marking above, so the
+      // user's tab stays a fallback tab (no dialog auto-accept hook).
+      // Without either: the single active recording (never "whatever tab is
       // active now", the user may have switched tabs while recording).
-      let id = Number.isInteger(tabId) ? tabId : null;
+      let id = Number.isInteger(tabId)
+        ? tabId
+        : Number.isInteger(payload.recordingTabId) && payload.recordingTabId >= 0
+          ? payload.recordingTabId
+          : null;
       if (id === null) {
         const list = await bg2bOffscreen({ type: "mcp-offscreen-audio-list" }, "list recordings");
         const ids = Array.isArray(list.tabIds) ? list.tabIds : [];
@@ -2962,12 +5060,12 @@ async function handleCommand(action, payload, tabId, ctx = {}) {
       }
       if (targetTab === null) throw new Error("The request was not made by a tab (e.g. a service worker); pass tabId to re-fetch it from a tab");
       const deadline = bg2bDeadline(ctx);
-      await ensureContent(targetTab, 0);
-      const r = await bg2bTopFrameSend(targetTab, "network_refetch", { url, method: "GET" }, deadline);
+      await ensureContent(targetTab, 0, undefined, ctx && ctx.signal);
+      const r = await bg2bTopFrameSend(targetTab, "network_refetch", { url, method: "GET" }, deadline, ctx && ctx.signal);
       return { url, source: "refetch", ...unwrap(r) };
     }
     case "network_throttle": {
-      const id = tabId ?? (await activeTabId());
+      const id = tabId ?? (await activeTabId(ctx));
       const profile = payload.profile || "online";
       let params = { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 };
       if (profile === "offline") {
@@ -2994,18 +5092,10 @@ async function handleCommand(action, payload, tabId, ctx = {}) {
       }
       // The override lives only as long as the CDP session: a persistent
       // "throttle" debugger holder keeps it until it is cleared ('online').
-      const noThrottle = { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 };
       const clears = !params.offline && params.latency <= 0 && params.downloadThroughput <= 0 && params.uploadThroughput <= 0;
       if (clears) {
-        const had = throttleSessions.has(id) || hasDebuggerHolder(id, "throttle");
-        if (had) {
-          // Reset explicitly: other holders (mock, headers, ...) may keep the session.
-          try {
-            await cdpSend({ tabId: id }, "Network.emulateNetworkConditions", noThrottle);
-          } catch {}
-          throttleSessions.delete(id);
-          await releaseDebugger(id, "throttle");
-        }
+        // Reset explicitly: other holders (mock, headers, ...) may keep the session.
+        const had = await teardownDebugSession("throttle", id);
         return { ok: true, tabId: id, profile, params, active: false, cleared: had };
       }
       const had = throttleSessions.has(id);
@@ -3024,7 +5114,7 @@ async function handleCommand(action, payload, tabId, ctx = {}) {
       return { ok: true, tabId: id, profile, params, active: true };
     }
     case "network_set_headers": {
-      const id = tabId ?? (await activeTabId());
+      const id = tabId ?? (await activeTabId(ctx));
       const raw = payload.headers;
       if (raw != null && (typeof raw !== "object" || Array.isArray(raw))) throw new Error("headers must be an object of name -> value");
       const headers = {};
@@ -3032,14 +5122,7 @@ async function handleCommand(action, payload, tabId, ctx = {}) {
       // Extra headers live only as long as the CDP session: a persistent
       // "headers" debugger holder keeps them until cleared with {}.
       if (!Object.keys(headers).length) {
-        const had = headerSessions.has(id) || hasDebuggerHolder(id, "headers");
-        if (had) {
-          try {
-            await cdpSend({ tabId: id }, "Network.setExtraHTTPHeaders", { headers: {} });
-          } catch {}
-          headerSessions.delete(id);
-          await releaseDebugger(id, "headers");
-        }
+        const had = await teardownDebugSession("headers", id);
         return { ok: true, tabId: id, headers, active: false, cleared: had };
       }
       const had = headerSessions.has(id);
@@ -3172,7 +5255,7 @@ async function handleCommand(action, payload, tabId, ctx = {}) {
     }
     case "session_state_save": {
       // (The gate also requires cookies_list + storage_get: REQUIRES.)
-      const id = tabId ?? (await activeTabId());
+      const id = tabId ?? (await activeTabId(ctx));
       const t = await chrome.tabs.get(id);
       const tabUrl = t.url || "";
       const origin = bg2bHttpOrigin(tabUrl);
@@ -3191,9 +5274,10 @@ async function handleCommand(action, payload, tabId, ctx = {}) {
       }
       // Storage of the top frame (never a frame_focus target), untruncated.
       const deadline = bg2bDeadline(ctx);
-      await ensureContent(id, 0);
-      const local = unwrap(await bg2bTopFrameSend(id, "storage_get", { area: "local", full: true }, deadline));
-      const session = unwrap(await bg2bTopFrameSend(id, "storage_get", { area: "session", full: true }, deadline));
+      const signal = ctx && ctx.signal;
+      await ensureContent(id, 0, undefined, signal);
+      const local = unwrap(await bg2bTopFrameSend(id, "storage_get", { area: "local", full: true }, deadline, signal));
+      const session = unwrap(await bg2bTopFrameSend(id, "storage_get", { area: "session", full: true }, deadline, signal));
       for (const res of [local, session]) {
         if (res && res.truncated && Object.keys(res.truncated).length) {
           throw new Error("The content script returned truncated storage values; reload the extension/page and retry");
@@ -3217,7 +5301,7 @@ async function handleCommand(action, payload, tabId, ctx = {}) {
       // (The gate also requires cookies_set + storage_set: REQUIRES.)
       const { state } = payload;
       if (!state || typeof state !== "object" || Array.isArray(state)) throw new Error("state object is required");
-      const id = tabId ?? (await activeTabId());
+      const id = tabId ?? (await activeTabId(ctx));
       const isObj = (v) => !!v && typeof v === "object" && !Array.isArray(v);
       const localEntries = isObj(state.localStorage) ? Object.entries(state.localStorage) : [];
       const sessionEntries = isObj(state.sessionStorage) ? Object.entries(state.sessionStorage) : [];
@@ -3241,14 +5325,15 @@ async function handleCommand(action, payload, tabId, ctx = {}) {
       if (localEntries.length || sessionEntries.length) {
         if ((await tabOrigin()) !== savedOrigin) throw new Error("The tab navigated away while the state was being restored; storage was not written");
         const deadline = bg2bDeadline(ctx);
-        await ensureContent(id, 0);
+        const signal = ctx && ctx.signal;
+        await ensureContent(id, 0, undefined, signal);
         const str = (v) => (typeof v === "string" ? v : v == null ? "" : JSON.stringify(v));
         for (const [k, v] of localEntries) {
-          unwrap(await bg2bTopFrameSend(id, "storage_set", { area: "local", key: k, value: str(v) }, deadline));
+          unwrap(await bg2bTopFrameSend(id, "storage_set", { area: "local", key: k, value: str(v) }, deadline, signal));
           localKeys++;
         }
         for (const [k, v] of sessionEntries) {
-          unwrap(await bg2bTopFrameSend(id, "storage_set", { area: "session", key: k, value: str(v) }, deadline));
+          unwrap(await bg2bTopFrameSend(id, "storage_set", { area: "session", key: k, value: str(v) }, deadline, signal));
           sessionKeys++;
         }
       }
@@ -3296,7 +5381,7 @@ async function handleCommand(action, payload, tabId, ctx = {}) {
 
     // ----- network mock -----
     case "network_mock_start": {
-      const id = tabId ?? (await activeTabId());
+      const id = tabId ?? (await activeTabId(ctx));
       // Persistent "mock" holder: shares the attach with other CDP users
       // (an attach of our own that survived a worker restart is adopted).
       const dbg = await acquireDebugger(id, "mock");
@@ -3320,19 +5405,14 @@ async function handleCommand(action, payload, tabId, ctx = {}) {
       return { ok: true, tabId: id, routes: fetchSessions.get(id).routes.length, tookOver };
     }
     case "network_mock_stop": {
-      const id = tabId ?? (await activeTabId());
-      const dbg = { tabId: id };
-      try {
-        await cdpSend(dbg, "Fetch.disable", {});
-      } catch {}
-      fetchSessions.delete(id);
-      saveMockSessions();
-      // Detaches only when no other holder (emulation, throttle, ...) remains.
-      await releaseDebugger(id, "mock");
+      const id = tabId ?? (await activeTabId(ctx));
+      // Fetch.disable, session dropped; detaches only when no other holder
+      // (emulation, throttle, ...) remains.
+      await teardownDebugSession("mock", id);
       return { ok: true, tabId: id };
     }
     case "network_mock_route": {
-      const id = tabId ?? (await activeTabId());
+      const id = tabId ?? (await activeTabId(ctx));
       let sess = fetchSessions.get(id);
       if (!sess) throw new Error("Run network_mock_start first");
       const action = payload.action || "block";
@@ -3371,12 +5451,12 @@ async function handleCommand(action, payload, tabId, ctx = {}) {
       return { ok: true, tabId: id, route };
     }
     case "network_mock_list": {
-      const id = tabId ?? (await activeTabId());
+      const id = tabId ?? (await activeTabId(ctx));
       const sess = fetchSessions.get(id);
       return { tabId: id, active: !!sess, routes: sess ? sess.routes : [] };
     }
     case "network_mock_remove": {
-      const id = tabId ?? (await activeTabId());
+      const id = tabId ?? (await activeTabId(ctx));
       const sess = fetchSessions.get(id);
       if (!sess) return { ok: false, tabId: id };
       sess.routes = sess.routes.filter((r) => r.id !== payload.routeId);
@@ -3384,7 +5464,7 @@ async function handleCommand(action, payload, tabId, ctx = {}) {
       return { ok: true, tabId: id, routes: sess.routes.length };
     }
     case "network_mock_clear": {
-      const id = tabId ?? (await activeTabId());
+      const id = tabId ?? (await activeTabId(ctx));
       const sess = fetchSessions.get(id);
       if (sess) sess.routes = [];
       saveMockSessions();
@@ -3394,7 +5474,7 @@ async function handleCommand(action, payload, tabId, ctx = {}) {
       // Spy capture: full request records (method/headers/postData) + response
       // bodies collected while a mock session holds the debugger. Requires
       // network_mock_start first (no routes needed — unmatched traffic passes).
-      const id = tabId ?? (await activeTabId());
+      const id = tabId ?? (await activeTabId(ctx));
       const sess = fetchSessions.get(id);
       if (!sess) throw new Error("Run network_mock_start first (spy mode needs the debugger session)");
       let items = (sess.bodies || []).slice();
@@ -3453,7 +5533,7 @@ async function handleCommand(action, payload, tabId, ctx = {}) {
 
     // ----- file upload (CDP DOM.setFileInputFiles) -----
     case "dom_upload": {
-      const id = tabId ?? (await activeTabId());
+      const id = tabId ?? (await activeTabId(ctx));
       const sel = bg2aCdpSelector(payload.selector);
       const files = payload.filePaths;
       if (!files || !files.length) throw new Error("filePaths is empty");
@@ -3499,7 +5579,7 @@ async function handleCommand(action, payload, tabId, ctx = {}) {
 
     // ----- HAR -----
     case "har_export": {
-      const id = tabId ?? (await activeTabId());
+      const id = tabId ?? (await activeTabId(ctx));
       const n = Number(payload.limit);
       const lim = Number.isInteger(n) && n > 0 ? Math.min(n, 5000) : 300;
       let title = "";
@@ -3514,7 +5594,7 @@ async function handleCommand(action, payload, tabId, ctx = {}) {
 
     // ----- frames -----
     case "frame_list": {
-      const id = tabId ?? (await activeTabId());
+      const id = tabId ?? (await activeTabId(ctx));
       const frames = (await chrome.webNavigation.getAllFrames({ tabId: id })) || [];
       const s = stickyFrames.get(id);
       return {
@@ -3528,7 +5608,7 @@ async function handleCommand(action, payload, tabId, ctx = {}) {
     case "frame_focus": {
       // Resolves {frameId?, frameUrl?} to ONE frame; later content commands go
       // only to it (cleared by frame_clear or a main-frame navigation).
-      const id = tabId ?? (await activeTabId());
+      const id = tabId ?? (await activeTabId(ctx));
       const frames = (await chrome.webNavigation.getAllFrames({ tabId: id })) || [];
       const sub = payload.frameUrl === undefined || payload.frameUrl === null ? "" : String(payload.frameUrl);
       let pick = null;
@@ -3556,21 +5636,21 @@ async function handleCommand(action, payload, tabId, ctx = {}) {
       return { ok: true, tabId: id, frameId: pick.frameId, url: pick.url };
     }
     case "frame_clear": {
-      const id = tabId ?? (await activeTabId());
+      const id = tabId ?? (await activeTabId(ctx));
       clearStickyFrame(id);
       return { ok: true, tabId: id };
     }
 
     // ----- tabs + windows -----
     case "tab_pin": {
-      const id = tabId ?? (await activeTabId());
+      const id = tabId ?? (await activeTabId(ctx));
       const cur = await chrome.tabs.get(id);
       const pinned = payload.pinned !== undefined ? !!payload.pinned : !cur.pinned;
       await chrome.tabs.update(id, { pinned });
       return { ok: true, id, pinned };
     }
     case "tab_mute": {
-      const id = tabId ?? (await activeTabId());
+      const id = tabId ?? (await activeTabId(ctx));
       const cur = await chrome.tabs.get(id);
       const currentlyMuted = !!(cur.mutedInfo && cur.mutedInfo.muted);
       const muted = payload.muted !== undefined ? !!payload.muted : !currentlyMuted;
@@ -3614,7 +5694,7 @@ async function handleCommand(action, payload, tabId, ctx = {}) {
 
     // ----- accessibility tree -----
     case "page_axtree": {
-      const id = tabId ?? (await activeTabId());
+      const id = tabId ?? (await activeTabId(ctx));
       // Real hierarchy from childIds (D19); maxNodes caps the emitted nodes.
       const maxNodes = Math.min(Math.max(Math.round(Number(payload.maxNodes)) || 800, 1), 5000);
       const out = await withDebugger(id, async (dbg) => {
@@ -3629,19 +5709,31 @@ async function handleCommand(action, payload, tabId, ctx = {}) {
     // ----- permissions + geolocation -----
     case "permissions_grant": {
       const map = { geolocation: "location", notifications: "notifications", camera: "camera", microphone: "microphone", popups: "popups", javascript: "javascript", images: "images", cookies: "cookies" };
-      const resource = map[payload.permission];
-      if (!resource || !chrome.contentSettings[resource]) throw new Error(`Unsupported permission: ${payload.permission}`);
-      let origin = payload.origin;
-      if (!origin) {
-        const id = tabId ?? (await activeTabId());
+      const resource = bg2aHas(map, payload.permission) ? map[payload.permission] : null;
+      if (!resource || !chrome.contentSettings || !chrome.contentSettings[resource]) throw new Error(`Unsupported permission: ${payload.permission}`);
+      const setting = payload.setting === undefined || payload.setting === null ? "allow" : payload.setting;
+      if (!PERMISSION_SETTINGS.has(setting)) throw new Error(`Invalid setting: ${capStr(String(setting), 50)} (use allow, block or ask)`);
+      // One exact http(s) origin, never a pattern: "https://*" or "*://*"
+      // would grant (or block) the setting browser-wide.
+      let origin;
+      if (payload.origin !== undefined && payload.origin !== null && payload.origin !== "") {
+        origin = exactHttpOrigin(payload.origin);
+        if (!origin) {
+          throw new Error(
+            `Invalid origin: ${capStr(String(payload.origin), 200)} (give one exact http(s) origin such as https://example.com: no wildcards, paths or patterns)`
+          );
+        }
+      } else {
+        const id = tabId ?? (await activeTabId(ctx));
         const t = await chrome.tabs.get(id);
-        origin = new URL(t.url).origin;
+        origin = bg2bHttpOrigin(t.url);
+        if (!origin) throw new Error(`permissions_grant needs an http(s) page or an explicit origin (tab ${id} shows ${capStr(t.url || "", 200) || "no URL"})`);
       }
-      await chrome.contentSettings[resource].set({ primaryPattern: `${origin}/*`, setting: payload.setting || "allow" });
-      return { ok: true, permission: payload.permission, origin, setting: payload.setting || "allow" };
+      await chrome.contentSettings[resource].set({ primaryPattern: `${origin}/*`, setting });
+      return { ok: true, permission: payload.permission, origin, setting };
     }
     case "emulation_geolocation": {
-      const id = tabId ?? (await activeTabId());
+      const id = tabId ?? (await activeTabId(ctx));
       const latitude = Number(payload.latitude);
       const longitude = Number(payload.longitude);
       const accuracy = payload.accuracy === undefined || payload.accuracy === null ? 50 : Number(payload.accuracy);
@@ -3657,7 +5749,8 @@ async function handleCommand(action, payload, tabId, ctx = {}) {
       } catch (e) {
         if (!had) {
           emulationSessions.delete(id);
-          await releaseDebugger(id, "emulation").catch(() => {});
+          // (other emulation state on the tab may share the holder)
+          await releaseHolderIfUnused(id, "emulation").catch(() => {});
         }
         throw e;
       }
@@ -3665,19 +5758,76 @@ async function handleCommand(action, payload, tabId, ctx = {}) {
       return { ok: true, tabId: id, latitude, longitude };
     }
     case "emulation_geolocation_clear": {
-      const id = tabId ?? (await activeTabId());
-      const dbg = { tabId: id };
-      try {
-        await cdpSend(dbg, "Emulation.clearGeolocationOverride", {});
-      } catch {}
-      emulationSessions.delete(id);
-      await releaseDebugger(id, "emulation");
+      const id = tabId ?? (await activeTabId(ctx));
+      await teardownDebugSession("geolocation", id);
       return { ok: true, tabId: id };
+    }
+    case "emulation_viewport": {
+      const id = tabId ?? (await activeTabId(ctx));
+      if (bg2cBool(payload, "reset", false)) {
+        const had = await teardownDebugSession("viewport", id);
+        return { tabId: id, applied: { reset: true }, cleared: had };
+      }
+      const width = bg2cInt(payload, "width", 1, 16384);
+      const height = bg2cInt(payload, "height", 1, 16384);
+      const deviceScaleFactor = bg2cNum(payload, "deviceScaleFactor", 0, 10, 0); // 0 = the screen's own
+      const mobile = bg2cBool(payload, "mobile", false);
+      // touch follows mobile unless given: a phone viewport without touch input is rarely wanted
+      const touch = bg2cBool(payload, "touch", mobile);
+      const applied = { width, height, deviceScaleFactor, mobile, touch };
+      throwIfAborted(ctx && ctx.signal);
+      await bg2cApplyEmulation(id, viewportSessions, applied, async (dbg) => {
+        await cdpSend(dbg, "Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor, mobile });
+        await cdpSend(dbg, "Emulation.setTouchEmulationEnabled", touch ? { enabled: true, maxTouchPoints: 5 } : { enabled: false });
+      });
+      return { tabId: id, applied };
+    }
+    case "emulation_media": {
+      // Fields not given keep their current override; null removes one.
+      const id = tabId ?? (await activeTabId(ctx));
+      if (bg2cBool(payload, "reset", false)) {
+        const had = await teardownDebugSession("media", id);
+        return { tabId: id, applied: { reset: true }, cleared: had };
+      }
+      const next = Object.assign({}, mediaSessions.get(id) || {});
+      let given = 0;
+      for (const [key, [allowed]] of Object.entries(BG2C_MEDIA_FEATURES).concat([["media", [BG2C_MEDIA_TYPES]]])) {
+        if (payload[key] === undefined) continue;
+        given++;
+        if (payload[key] === null) delete next[key];
+        else next[key] = bg2cEnum(payload, key, allowed);
+      }
+      if (!given) throw new Error("emulation_media needs colorScheme, reducedMotion, forcedColors or media (or reset: true)");
+      if (!Object.keys(next).length) {
+        const had = await teardownDebugSession("media", id);
+        return { tabId: id, applied: {}, cleared: had };
+      }
+      throwIfAborted(ctx && ctx.signal);
+      await bg2cApplyEmulation(id, mediaSessions, next, (dbg) => cdpSend(dbg, "Emulation.setEmulatedMedia", bg2cMediaParams(next)));
+      return { tabId: id, applied: next };
+    }
+    case "emulation_cpu": {
+      const id = tabId ?? (await activeTabId(ctx));
+      const rate = bg2cNum(payload, "rate", 1, 20);
+      if (rate === 1) {
+        // 1 = no throttling: clear it (and release the holder when unused)
+        await teardownDebugSession("cpu", id);
+        return { tabId: id, rate: 1 };
+      }
+      throwIfAborted(ctx && ctx.signal);
+      await bg2cApplyEmulation(id, cpuSessions, { rate }, (dbg) => cdpSend(dbg, "Emulation.setCPUThrottlingRate", { rate }));
+      return { tabId: id, rate };
+    }
+    case "emulation_reset": {
+      // Viewport, media, CPU and geolocation; the shared holder goes with the last one.
+      const id = tabId ?? (await activeTabId(ctx));
+      const cleared = await teardownTabDebugSessions(id, (k) => k.holder === "emulation");
+      return { tabId: id, cleared };
     }
 
     // ----- performance -----
     case "page_metrics": {
-      const id = tabId ?? (await activeTabId());
+      const id = tabId ?? (await activeTabId(ctx));
       const out = await withDebugger(id, async (dbg) => {
         await cdpSend(dbg, "Performance.enable", {});
         const m = await cdpSend(dbg, "Performance.getMetrics", {});
@@ -3690,17 +5840,35 @@ async function handleCommand(action, payload, tabId, ctx = {}) {
       });
       return { tabId: id, metrics: out };
     }
+    case "perf_web_vitals": {
+      const id = tabId ?? (await activeTabId(ctx));
+      return await bg2cWebVitals(id, payload, ctx);
+    }
+    case "perf_trace_start": {
+      const id = tabId ?? (await activeTabId(ctx));
+      return await bg2cTraceStart(id, payload, ctx);
+    }
+    case "perf_trace_stop": {
+      // Without a tabId: the only running trace, else the active tab.
+      let id = tabId;
+      if (id === undefined) id = traceSessions.size === 1 ? traceSessions.keys().next().value : await activeTabId(ctx);
+      return await bg2cTraceStop(id, ctx);
+    }
+    case "perf_trace_chunk":
+      // (no tab involved: the trace is addressed by its traceId)
+      return bg2cTraceChunk(payload);
 
     // ----- trusted input (CDP Input.* — real, trusted events) -----
     case "trusted_click": {
       // Scroll into view (content, focused frame or main frame), convert to
       // main-frame viewport px, refuse points outside the viewport (D7/F8).
-      const id = tabId ?? (await activeTabId());
+      const id = tabId ?? (await activeTabId(ctx));
       const btn = payload.button || "left";
       const count = payload.doubleClick ? 2 : 1;
       const out = await withDebugger(id, async (dbg) => {
         const target = await bg2aScrollTarget(id, payload.selector, ctx);
         const { x, y } = await bg2aViewportPoint(dbg, id, target, payload.selector);
+        throwIfAborted(ctx && ctx.signal);
         await cdpSend(dbg, "Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
         for (let i = 1; i <= count; i++) {
           await cdpSend(dbg, "Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: btn, clickCount: i });
@@ -3717,18 +5885,18 @@ async function handleCommand(action, payload, tabId, ctx = {}) {
       // The target is resolved, scrolled and focused by content.js in the
       // targeted frame (every selector form works, frames included); the text
       // then goes to the focused element as trusted CDP input.
-      const id = tabId ?? (await activeTabId());
+      const id = tabId ?? (await activeTabId(ctx));
       const tmo = ctx && ctx.timeoutMs;
       if (payload.selector === undefined || payload.selector === null || String(payload.selector).trim() === "") throw new Error("selector is required");
       // Attach first: the debugging infobar must not appear between focusing and typing.
       await withDebugger(id, async (dbg) => {
-        const sv = unwrap(await toContent(id, "scroll_into_view", { selector: String(payload.selector) }, tmo));
+        const sv = unwrap(await toContent(id, "scroll_into_view", { selector: String(payload.selector) }, tmo, ctx));
         let sel = (sv && sv.ref) || String(payload.selector);
         if (payload.clearFirst) {
-          const dt = unwrap(await toContent(id, "dom_type", { selector: sel, text: "", clearFirst: true }, tmo));
+          const dt = unwrap(await toContent(id, "dom_type", { selector: sel, text: "", clearFirst: true }, tmo, ctx));
           if (dt && dt.ref) sel = dt.ref; // dom_type may retarget (label / wrapper -> its input)
         }
-        const fr = await toContent(id, "dom_focus", { selector: sel }, tmo);
+        const fr = await toContent(id, "dom_focus", { selector: sel }, tmo, ctx);
         const f = unwrap(fr);
         if (!f || f.focused === false) {
           // A host with delegatesFocus passes focus to an inner element: accept
@@ -3756,6 +5924,7 @@ async function handleCommand(action, payload, tabId, ctx = {}) {
             throw new Error(`Element did not take focus: ${payload.selector} (target the input, textarea or contenteditable element itself)`);
           }
         }
+        throwIfAborted(ctx && ctx.signal);
         await cdpSend(dbg, "Input.insertText", { text: String(payload.text ?? "") });
         if (payload.pressEnter) {
           // keyDown + text "\r" generates keypress -> implicit form submission (D8)
@@ -3765,7 +5934,7 @@ async function handleCommand(action, payload, tabId, ctx = {}) {
       return { ok: true, tabId: id, trusted: true };
     }
     case "trusted_key": {
-      const id = tabId ?? (await activeTabId());
+      const id = tabId ?? (await activeTabId(ctx));
       const k = payload.key;
       const spec = bg2aKeySpec(k);
       if (!spec) throw new Error(`Unsupported key: ${k} (named keys: ${Object.keys(BG2A_NAMED_KEYS).filter((n) => n !== " ").join(", ")}, or one character)`);
@@ -3775,7 +5944,7 @@ async function handleCommand(action, payload, tabId, ctx = {}) {
       return { ok: true, tabId: id, trusted: true };
     }
     case "trusted_scroll": {
-      const id = tabId ?? (await activeTabId());
+      const id = tabId ?? (await activeTabId(ctx));
       let { x, y } = payload;
       if (x === undefined || y === undefined) {
         const vp = await withDebugger(id, async (dbg) => {
@@ -3797,15 +5966,17 @@ async function handleCommand(action, payload, tabId, ctx = {}) {
       return { ok: true, tabId: id, x, y, trusted: true };
     }
     case "trusted_drag": {
-      const id = tabId ?? (await activeTabId());
+      const id = tabId ?? (await activeTabId(ctx));
       const pts = await withDebugger(id, async (dbg) => {
         const a0 = await bg2aScrollTarget(id, payload.from, ctx);
         const b = await bg2aScrollTarget(id, payload.to, ctx);
         // Centring the target may have moved the source: measure it again without scrolling.
         let a = a0;
         try {
-          const q = await toContent(id, "dom_query", { selector: a0.v.ref || String(payload.from), limit: 1 }, ctx && ctx.timeoutMs);
-          const it = (unwrap(q) || [])[0];
+          const q = await toContent(id, "dom_query", { selector: a0.v.ref || String(payload.from), limit: 1 }, ctx && ctx.timeoutMs, ctx);
+          // dom_query answers { total, returned, items } (older content scripts: a bare array)
+          const qv = unwrap(q);
+          const it = (Array.isArray(qv) ? qv : qv && Array.isArray(qv.items) ? qv.items : [])[0];
           if (it && typeof it === "object" && it.w > 0 && it.h > 0) {
             a = { frameId: q.frameId || 0, v: { cx: it.x + it.w / 2, cy: it.y + it.h / 2, width: it.w, height: it.h } };
           }
@@ -3813,6 +5984,8 @@ async function handleCommand(action, payload, tabId, ctx = {}) {
         const pa = await bg2aViewportPoint(dbg, id, a, payload.from, false);
         const pb = await bg2aViewportPoint(dbg, id, b, payload.to, false);
         const ax = pa.x, ay = pa.y, bx = pb.x, by = pb.y;
+        // (checked once before the button goes down: a drag is never left half done)
+        throwIfAborted(ctx && ctx.signal);
         await cdpSend(dbg, "Input.dispatchMouseEvent", { type: "mouseMoved", x: ax, y: ay });
         await cdpSend(dbg, "Input.dispatchMouseEvent", { type: "mousePressed", x: ax, y: ay, button: "left", buttons: 1, clickCount: 1 });
         const steps = 8;
@@ -3835,7 +6008,7 @@ async function handleCommand(action, payload, tabId, ctx = {}) {
 
     // ----- raw CDP -----
     case "cdp_send": {
-      const id = tabId ?? (await activeTabId());
+      const id = tabId ?? (await activeTabId(ctx));
       const out = await withDebugger(id, async (dbg) => cdpSend(dbg, payload.method, payload.params || {}));
       return { tabId: id, result: out };
     }

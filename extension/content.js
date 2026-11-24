@@ -24,6 +24,60 @@
   };
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // ---------- cancellation ----------
+  // Long-running commands (page_wait, slow dom_type, network_refetch) get an
+  // AbortSignal from the message router; the background aborts them with
+  // { cmd: "__cancel", payload: { cmdId } } when the MCP request is cancelled.
+  const cancelledError = () => new Error("cancelled");
+
+  function throwIfAborted(signal) {
+    if (signal && signal.aborted) throw cancelledError();
+  }
+
+  // A task boundary that is not a timer. Hidden and occluded tabs clamp
+  // setTimeout to 1 s and more (once a minute after 5 minutes hidden); a
+  // MessageChannel task runs at once. Other tasks (a __cancel message,
+  // rendering) can run in between; rejects with "cancelled" once the signal
+  // has aborted.
+  function yieldTask(signal) {
+    return new Promise((resolve, reject) => {
+      if (signal && signal.aborted) {
+        reject(cancelledError());
+        return;
+      }
+      const { port1, port2 } = new MessageChannel();
+      port1.onmessage = () => {
+        port1.close();
+        port2.close();
+        if (signal && signal.aborted) reject(cancelledError());
+        else resolve();
+      };
+      port2.postMessage(0);
+    });
+  }
+
+  // sleep() that rejects with "cancelled" as soon as the signal aborts.
+  function sleepAbortable(ms, signal) {
+    if (!signal) return sleep(ms);
+    return new Promise((resolve, reject) => {
+      if (signal.aborted) {
+        reject(cancelledError());
+        return;
+      }
+      let timer = 0;
+      const onAbort = () => {
+        clearTimeout(timer);
+        reject(cancelledError());
+      };
+      timer = setTimeout(() => {
+        signal.removeEventListener("abort", onAbort);
+        resolve();
+      }, ms);
+      signal.addEventListener("abort", onAbort, { once: true });
+    });
+  }
+
   const ELEMENT_NODE = 1;
   const DOCUMENT_NODE = 9;
 
@@ -233,11 +287,15 @@
       throw new Error(`Invalid XPath (it must select nodes): ${xp}`);
     }
     const out = [];
+    const seen = new Set();
     for (let i = 0; i < it.snapshotLength && out.length < limit; i++) {
       let n = it.snapshotItem(i);
       if (n && n.nodeType === 2) n = n.ownerElement; // attribute node
       else if (n && n.nodeType !== ELEMENT_NODE) n = n.parentElement; // text/comment node
-      if (n && !out.includes(n)) out.push(n);
+      if (n && !seen.has(n)) {
+        seen.add(n);
+        out.push(n);
+      }
     }
     return out;
   }
@@ -392,7 +450,149 @@
   }
 
   // ---------- snapshot / query ----------
-  function describe(el) {
+  // Short strings in snapshot / query output end with "…" when cut.
+  const clip = (s, n) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
+  // Line breaks of a live value would split its snapshot line.
+  const oneLine = (s) => s.replace(/\r\n?|\n/g, "\\n");
+
+  // textarea children are its default value (never the live one); select
+  // option lists would eat the whole budget of a wrapper's text.
+  const SHORT_TEXT_SKIP = new Set(["script", "style", "noscript", "template", "head", "title", "meta", "link", "textarea", "select", "datalist"]);
+  // Elements whose boundaries separate words (innerText would put a line break there).
+  const BLOCKISH = new Set([
+    "address", "article", "aside", "blockquote", "br", "button", "dd", "details", "dialog", "div", "dl", "dt",
+    "fieldset", "figcaption", "figure", "footer", "form", "h1", "h2", "h3", "h4", "h5", "h6", "header", "hr",
+    "img", "label", "li", "main", "nav", "ol", "option", "p", "pre", "section", "summary", "table", "td", "th",
+    "tr", "ul",
+  ]);
+
+  // How innerText sees an element, from computed style only (a style recalc at
+  // most, never layout): 0 rendered, 1 own text invisible (visibility is
+  // inherited and a visibility:visible descendant shows again, so it is
+  // checked per text node, on the text's parent), 2 subtree not rendered
+  // (display:none, or content-visibility:hidden: never painted, although
+  // Chrome's innerText includes it). Not checkVisibility(): it is false for
+  // display:contents wrappers, whose children do render.
+  // cache: one Map per snapshot / query call.
+  function renderState(el, cache) {
+    let s = cache ? cache.get(el) : undefined;
+    if (s !== undefined) return s;
+    s = 0;
+    try {
+      const cs = getComputedStyle(el);
+      if (cs.display === "none" || cs.contentVisibility === "hidden") s = 2;
+      else if (cs.visibility && cs.visibility !== "visible") s = 1;
+    } catch {}
+    if (cache) cache.set(el, s);
+    return s;
+  }
+
+  // Only the summary of a closed <details> is rendered.
+  const closedDetails = (p) => !!p && p.localName === "details" && !p.hasAttribute("open");
+
+  // Whitespace-normalized text of el without layout, stopping once max chars
+  // are gathered (innerText of every matched wrapper made a snapshot of
+  // nested wrappers cost O(depth x page text)). Like innerText it leaves out
+  // text the page does not render: script/style, [hidden] and display:none
+  // subtrees, visibility:hidden text and the closed part of <details>; also
+  // content-visibility:hidden subtrees. el itself is not checked: a hidden
+  // element (marked "(hidden)" in the snapshot) still reports its text, as
+  // innerText does.
+  function shortText(el, max, cache) {
+    let out = "";
+    let gap = false;
+    const tw = document.createTreeWalker(el, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
+      acceptNode: (n) => {
+        if (n.nodeType !== ELEMENT_NODE) return NodeFilter.FILTER_ACCEPT;
+        if (SHORT_TEXT_SKIP.has(n.localName) || n.hidden) return NodeFilter.FILTER_REJECT;
+        if (n.localName !== "summary" && closedDetails(n.parentElement)) return NodeFilter.FILTER_REJECT;
+        return renderState(n, cache) === 2 ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
+      },
+    });
+    for (let n = tw.nextNode(); n && out.length <= max; n = tw.nextNode()) {
+      if (n.nodeType !== 3) {
+        if (BLOCKISH.has(n.localName)) gap = true;
+        continue;
+      }
+      const parent = n.parentElement;
+      if (parent && (renderState(parent, cache) === 1 || closedDetails(parent))) continue;
+      let v = n.nodeValue || "";
+      if (v.length > max * 4 + 64) v = v.slice(0, max * 4 + 64); // one huge text node (a log in a <pre>)
+      const w = v.replace(/\s+/g, " ");
+      if (w === " " || w === "") {
+        if (w) gap = true;
+        continue;
+      }
+      if (w[0] === " ") gap = true;
+      const t = w.trim();
+      out += (gap && out ? " " : "") + t;
+      gap = w[w.length - 1] === " ";
+    }
+    return clip(out, max);
+  }
+
+  const NO_TEXT_TAGS = new Set(["input", "textarea", "select", "iframe", "frame", "script", "style"]);
+  const VALUE_ROLES = new Set(["slider", "spinbutton", "progressbar", "meter", "scrollbar"]);
+
+  // Live state tokens (properties, not attributes: a typed value, a ticked box
+  // or a chosen option never shows up in the markup). Passwords only report
+  // whether they are filled.
+  function liveState(el, tag, parts) {
+    const type = tag === "input" ? (el.type || "text").toLowerCase() : "";
+    if (type === "password") {
+      parts.push(`filled=${el.value ? "true" : "false"}`);
+    } else if (isValueEditable(el) || type === "range" || type === "color") {
+      const live = String(el.value ?? "");
+      const attr = el.getAttribute("value");
+      // The value attribute (printed above as value="...") is only the default.
+      if (attr) {
+        if (live !== attr) parts.push(`current="${clip(oneLine(live), 60)}"`);
+      } else if (live) {
+        parts.push(`value="${clip(oneLine(live), 60)}"`);
+      }
+    } else if (type === "checkbox" || type === "radio") {
+      if (el.indeterminate) parts.push("checked=mixed");
+      else if (el.checked) parts.push("checked");
+    } else if (tag === "select") {
+      const labels = Array.from(el.selectedOptions || [], (o) => normText(o.label || o.text));
+      if (labels.length) parts.push(`selected="${clip(labels.join(", "), 60)}"`);
+      // The labels dom_select accepts (the select's own text is left out):
+      // the first 15, so a country list stays one short token.
+      const all = el.options || [];
+      const opts = [];
+      let i = 0;
+      for (; i < all.length && opts.length < 15; i++) {
+        const t = normText(all[i].label || all[i].text);
+        if (t) opts.push(t);
+      }
+      if (opts.length) parts.push(`options="${clip(opts.join(" | "), 120)}"` + (i < all.length ? ` (+${all.length - i} more)` : ""));
+    }
+    let disabled = false;
+    try {
+      disabled = el.matches(":disabled");
+    } catch {}
+    if (disabled || el.getAttribute("aria-disabled") === "true") parts.push("disabled");
+    if ((isValueEditable(el) && el.readOnly) || el.getAttribute("aria-readonly") === "true") parts.push("readonly");
+    if (el.required === true || el.getAttribute("aria-required") === "true") parts.push("required");
+    const expanded = el.getAttribute("aria-expanded");
+    if (expanded === "true" || expanded === "false") parts.push(`expanded=${expanded}`);
+    if (type !== "checkbox" && type !== "radio") {
+      const ac = el.getAttribute("aria-checked");
+      if (ac === "true") parts.push("checked");
+      else if (ac === "mixed") parts.push("checked=mixed");
+    }
+    if (el.getAttribute("aria-selected") === "true") parts.push("selected");
+    const pressed = el.getAttribute("aria-pressed");
+    if (pressed === "true" || pressed === "false" || pressed === "mixed") parts.push(`pressed=${pressed}`);
+    const role = el.getAttribute("role");
+    if (role && VALUE_ROLES.has(role) && tag !== "input" && !el.getAttribute("value")) {
+      const v = el.getAttribute("aria-valuetext") || el.getAttribute("aria-valuenow");
+      if (v) parts.push(`value="${clip(v, 60)}"`);
+    }
+    if (el.isContentEditable && el.hasAttribute("contenteditable")) parts.push("contenteditable");
+  }
+
+  function describe(el, styleCache) {
     const tag = (el.tagName || "?").toLowerCase();
     const ref = refOf(el);
     const parts = [`[ref=${ref}]`, `<${tag}>`];
@@ -403,11 +603,27 @@
         if (v) parts.push(`${a}="${String(v).slice(0, 60)}"`);
       } catch {}
     }
-    let txt = "";
+    const frame = tag === "iframe" || tag === "frame";
+    if (frame) {
+      // Frame content is not part of this snapshot; frame_focus targets it.
+      try {
+        const srcAttr = el.getAttribute("src") || (el.hasAttribute("srcdoc") ? "about:srcdoc" : "");
+        if (srcAttr) parts.push(`src="${clip(srcAttr, 100)}"`);
+        const title = el.getAttribute("title");
+        if (title) parts.push(`title="${clip(title, 60)}"`);
+      } catch {}
+      parts.push("(frame)");
+    }
     try {
-      txt = (el.innerText || el.textContent || "").trim().replace(/\s+/g, " ").slice(0, 120);
+      liveState(el, tag, parts);
     } catch {}
-    if (txt && !["script", "style"].includes(tag)) parts.push(`"${txt}"`);
+    let txt = "";
+    if (!NO_TEXT_TAGS.has(tag)) {
+      try {
+        txt = shortText(el, 120, styleCache);
+      } catch {}
+    }
+    if (txt) parts.push(`"${txt}"`);
     // visibility
     try {
       const r = el.getBoundingClientRect();
@@ -416,15 +632,25 @@
     return parts.join(" ");
   }
 
+  // Interactive widgets by role, editing hosts and frames (as markers) are part
+  // of both modes.
+  const WIDGET_SEL =
+    "summary,[role=button],[role=link],[role=checkbox],[role=radio],[role=tab],[role=menuitem]," +
+    "[role=menuitemcheckbox],[role=menuitemradio],[role=option],[role=switch],[role=combobox],[role=textbox]," +
+    "[role=slider],[role=searchbox],[role=spinbutton],[contenteditable]:not([contenteditable=false]),iframe,frame";
+  const SNAPSHOT_COMPACT_SEL = `a,button,input,select,textarea,${WIDGET_SEL},form,h1,h2,h3`;
+  const SNAPSHOT_FULL_SEL =
+    `a,button,input,select,textarea,${WIDGET_SEL},form,h1,h2,h3,h4,p,li,img,div,span,nav,header,main,footer,table,tr,td`;
+
   function snapshot(compact) {
     const root = document.body || document.documentElement;
     if (!root) return "(empty)";
-    const selector = compact
-      ? "a,button,input,select,textarea,[role=button],[role=link],[role=textbox],form,h1,h2,h3"
-      : "a,button,input,select,textarea,form,h1,h2,h3,h4,p,li,img,div,span,nav,header,main,footer,table,tr,td";
+    const selector = compact ? SNAPSHOT_COMPACT_SEL : SNAPSHOT_FULL_SEL;
     const limit = compact ? 400 : 1000;
     const out = [];
     let total = 0;
+    let frames = 0;
+    const styleCache = new Map();
     // Deep walk: elements inside (open or reachable closed) shadow roots are listed too.
     walkDeep(root, (el) => {
       let match = false;
@@ -433,29 +659,71 @@
       } catch {}
       if (match) {
         total++;
-        if (out.length < limit) out.push(describe(el));
+        if (el.localName === "iframe" || el.localName === "frame") frames++;
+        if (out.length < limit) out.push(describe(el, styleCache));
       }
       return false;
     });
     if (total > limit) out.push(`... (+${total - limit} more items trimmed)`);
-    out.unshift(`url=${location.href} title="${document.title}" interactive=${total}`);
+    let head = `url=${clip(String(location.href || ""), 300)} title="${clip(String(document.title || ""), 120)}" interactive=${total}`;
+    if (frames) head += ` frames=${frames} (frame content is not listed: frame_list + frame_focus to read a frame)`;
+    out.unshift(head);
     return out.join("\n");
   }
 
-  function queryAll(sel, limit = 20) {
-    const n = Math.max(1, Math.min(Number(limit) || 20, 500));
-    return findAll(sel, n).map((el) => {
+  // dom_query: { total (every match), returned, items (at most limit) }.
+  function queryAll(sel, limit) {
+    const n = Math.max(1, Math.min(Math.floor(Number(limit)) || 20, 500));
+    const all = findAll(sel, Infinity);
+    const styleCache = new Map();
+    const items = all.slice(0, n).map((el) => {
       const r = el.getBoundingClientRect ? el.getBoundingClientRect() : { x: 0, y: 0, width: 0, height: 0 };
+      let text = "";
+      try {
+        text = shortText(el, 200, styleCache);
+      } catch {}
       return {
         ref: refOf(el),
         tag: (el.tagName || "").toLowerCase(),
-        text: (el.innerText || el.textContent || "").trim().slice(0, 200),
+        text,
         x: Math.round(r.x || 0),
         y: Math.round(r.y || 0),
         w: Math.round(r.width || 0),
         h: Math.round(r.height || 0),
       };
     });
+    return { total: all.length, returned: items.length, items };
+  }
+
+  // ---------- page_html / page_text paging ----------
+  const PAGE_CHUNK_DEFAULT = 40000;
+  const PAGE_CHUNK_MAX = 500000;
+
+  // One window of a long string:
+  // { text, offset, length, totalLength, truncated (more after this window), nextOffset (number|null) }.
+  function pageSlice(full, payload) {
+    const total = full.length;
+    let offset = Math.floor(Number(payload.offset));
+    if (!Number.isFinite(offset) || offset < 0) offset = 0;
+    if (offset > total) offset = total;
+    let max = Math.floor(Number(payload.maxChars));
+    if (!Number.isFinite(max) || max <= 0) max = PAGE_CHUNK_DEFAULT;
+    max = Math.min(max, PAGE_CHUNK_MAX);
+    let end = Math.min(total, offset + max);
+    // Never split a surrogate pair between two windows.
+    if (end < total && end - 1 > offset) {
+      const c = full.charCodeAt(end - 1);
+      if (c >= 0xd800 && c <= 0xdbff) end--;
+    }
+    const text = full.slice(offset, end);
+    const more = end < total;
+    return { text, offset, length: text.length, totalLength: total, truncated: more, nextOffset: more ? end : null };
+  }
+
+  function pageTextAll() {
+    const root = document.body || document.documentElement;
+    if (!root) return "";
+    return typeof root.innerText === "string" ? root.innerText : root.textContent || "";
   }
 
   // ---------- synthetic pointer / mouse events ----------
@@ -647,9 +915,13 @@
     else el.value = value;
   }
 
-  function fireBeforeInput(el, data, inputType) {
+  // targetRanges: StaticRanges for getTargetRanges(); rich editors (Slate,
+  // Lexical) read the edit position from them.
+  function fireBeforeInput(el, data, inputType, targetRanges) {
     try {
-      return el.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, cancelable: true, composed: true, data, inputType }));
+      const init = { bubbles: true, cancelable: true, composed: true, data, inputType };
+      if (targetRanges) init.targetRanges = targetRanges;
+      return el.dispatchEvent(new InputEvent("beforeinput", init));
     } catch {
       return true;
     }
@@ -691,75 +963,177 @@
     sel.addRange(r);
   }
 
+  // The current selection as StaticRanges (beforeinput targetRanges).
+  function selectionRanges() {
+    try {
+      const sel = window.getSelection();
+      if (!sel || !sel.rangeCount || typeof StaticRange !== "function") return undefined;
+      const r = sel.getRangeAt(0);
+      return [
+        new StaticRange({ startContainer: r.startContainer, startOffset: r.startOffset, endContainer: r.endContainer, endOffset: r.endOffset }),
+      ];
+    } catch {
+      return undefined;
+    }
+  }
+
+  // Objects a caret goes around, never into.
+  const CARET_ATOMIC = new Set(["img", "video", "audio", "iframe", "canvas", "svg", "math", "hr", "input", "textarea", "select", "button", "object", "embed"]);
+
+  // Collapsed caret at the end of el's content: after the last item in
+  // document order that is either editable non-blank text or an island (an
+  // element that is not editable, such as a contenteditable=false mention or
+  // tag chip, or an atomic object such as an image), else at the end of el.
+  // After text the caret sits inside the text node (maps onto the model of
+  // rich editors more reliably than (el, childCount)); after an island it sits
+  // right behind it, so appended text never lands in front of a trailing chip.
+  // A <br> is not content (ProseMirror's trailing break). Blank text that
+  // follows an island in the same parent (the space mention editors add after
+  // a chip) is the end, so the caret goes after that space.
+  function caretAtEnd(el) {
+    const sel = window.getSelection();
+    if (!sel) return;
+    const r = document.createRange();
+    let last = null;
+    let island = false;
+    try {
+      const tw = document.createTreeWalker(el, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
+        acceptNode: (n) => {
+          if (n.nodeType !== ELEMENT_NODE) return NodeFilter.FILTER_ACCEPT;
+          if (!n.isContentEditable || CARET_ATOMIC.has(n.localName)) {
+            // Called in document order: the outermost island is the item, its inside never is.
+            last = n;
+            island = true;
+            return NodeFilter.FILTER_REJECT;
+          }
+          return NodeFilter.FILTER_SKIP;
+        },
+      });
+      for (let n = tw.nextNode(); n; n = tw.nextNode()) {
+        const p = n.parentElement;
+        if (!p || !p.isContentEditable) continue;
+        const v = n.nodeValue || "";
+        if (/[^ \t\n\r]/.test(v) || (island && v && p === last.parentElement)) {
+          last = n;
+          island = false;
+        }
+      }
+    } catch {}
+    if (last && !island) {
+      r.setStart(last, last.nodeValue.length);
+      r.collapse(true);
+    } else if (last) {
+      r.setStartAfter(last);
+      r.collapse(true);
+    } else {
+      r.selectNodeContents(el);
+      r.collapse(false);
+    }
+    sel.removeAllRanges();
+    sel.addRange(r);
+  }
+
   // Put the caret at the end of `el` unless the selection is already inside it.
   function ensureSelectionIn(el) {
     const sel = window.getSelection();
     if (!sel) return;
     if (sel.rangeCount && containsDeep(el, sel.getRangeAt(0).startContainer)) return;
-    const r = document.createRange();
-    r.selectNodeContents(el);
-    r.collapse(false);
-    sel.removeAllRanges();
-    sel.addRange(r);
+    caretAtEnd(el);
   }
 
   // Selection/Range fallback when execCommand is unavailable or refused.
-  function rangeInsert(el, text) {
+  // fireBefore=false when the caller already dispatched beforeinput. A line
+  // break (insertLineBreak / insertParagraph) becomes a <br>.
+  function rangeInsert(el, text, fireBefore = true, inputType = "insertText") {
     try {
       const sel = window.getSelection();
       if (!sel) return false;
       ensureSelectionIn(el);
-      if (!fireBeforeInput(el, text, "insertText")) return true;
+      const host = editingHost(el);
+      const lineBreak = inputType === "insertLineBreak" || inputType === "insertParagraph";
+      const data = lineBreak ? null : text;
+      if (fireBefore && !fireBeforeInput(host, data, inputType, selectionRanges())) return true;
       const r = sel.getRangeAt(0);
       r.deleteContents();
-      const tn = document.createTextNode(text);
-      r.insertNode(tn);
-      r.setStartAfter(tn);
+      const node = lineBreak ? document.createElement("br") : document.createTextNode(text);
+      r.insertNode(node);
+      r.setStartAfter(node);
       r.collapse(true);
       sel.removeAllRanges();
       sel.addRange(r);
-      fireInput(el, text, "insertText");
+      fireInput(host, data, inputType);
       return true;
     } catch {
       return false;
     }
   }
 
+  // maxlength applies to these input types (and textarea) only.
+  const MAXLENGTH_TYPES = new Set(["text", "search", "url", "tel", "email", "password"]);
+
+  function maxLengthOf(el) {
+    if (el.tagName !== "TEXTAREA" && !(el.tagName === "INPUT" && MAXLENGTH_TYPES.has((el.type || "text").toLowerCase()))) return -1;
+    const n = el.maxLength;
+    return Number.isFinite(n) && n >= 0 ? n : -1;
+  }
+
+  // One edit of an input/textarea the way a keystroke does it: beforeinput
+  // (cancelable) -> value through the prototype setter (React's value tracker
+  // keeps the old value, so its onChange fires) -> caret -> input.
+  // buf: { value } for input types without a selection API (number, email,
+  // date...), which sanitize partial values ("1." -> "") and so are rebuilt
+  // from the typed text instead of being read back. Appends there.
+  // Returns "inserted", "prevented" or "maxlength".
+  function editValue(el, text, inputType, buf) {
+    const v = buf ? buf.value : el.value;
+    let s = v.length;
+    let e = v.length;
+    if (!buf && supportsSelection(el)) {
+      s = el.selectionStart;
+      e = el.selectionEnd;
+    }
+    const max = maxLengthOf(el);
+    if (max >= 0 && text && v.length - (e - s) + text.length > max) return "maxlength";
+    if (!fireBeforeInput(el, inputType === "insertText" ? text : null, inputType)) return "prevented";
+    const next = v.slice(0, s) + text + v.slice(e);
+    setNativeValue(el, next);
+    if (buf) buf.value = next;
+    else if (supportsSelection(el)) {
+      try {
+        el.setSelectionRange(s + text.length, s + text.length);
+      } catch {}
+    }
+    fireInput(el, inputType === "insertText" ? text : null, inputType);
+    return "inserted";
+  }
+
+  // One edit of a contenteditable at the caret: beforeinput (rich editors
+  // cancel it and apply the edit to their own model) -> native editing
+  // command (trusted input event) -> Range fallback.
+  // Returns "inserted", "handled" (beforeinput cancelled) or "failed".
+  function editContent(el, text, inputType) {
+    ensureSelectionIn(el);
+    const host = editingHost(el);
+    if (!fireBeforeInput(host, inputType === "insertText" ? text : null, inputType, selectionRanges())) return "handled";
+    let ok = false;
+    try {
+      if (inputType === "insertParagraph") ok = document.execCommand("insertParagraph") || document.execCommand("insertLineBreak");
+      else if (inputType === "insertLineBreak") ok = document.execCommand("insertLineBreak");
+      else ok = document.execCommand("insertText", false, text);
+    } catch {}
+    if (ok) return "inserted";
+    return rangeInsert(el, text, false, inputType) ? "inserted" : "failed";
+  }
+
   // Inserts text at the caret (replacing the selection) like a keystroke would.
   function insertText(el, text, inputType = "insertText") {
-    if (isValueEditable(el)) {
-      const v = el.value;
-      let s = v.length;
-      let e = v.length;
-      if (supportsSelection(el)) {
-        s = el.selectionStart;
-        e = el.selectionEnd;
-      }
-      if (!fireBeforeInput(el, text, inputType)) return false;
-      setNativeValue(el, v.slice(0, s) + text + v.slice(e));
-      if (supportsSelection(el)) {
-        try {
-          el.setSelectionRange(s + text.length, s + text.length);
-        } catch {}
-      }
-      fireInput(el, text, inputType);
-      return true;
-    }
-    if (el.isContentEditable) {
-      ensureSelectionIn(el);
-      let ok = false;
-      try {
-        ok =
-          inputType === "insertLineBreak"
-            ? document.execCommand("insertLineBreak")
-            : document.execCommand("insertText", false, text);
-      } catch {}
-      return ok || rangeInsert(el, text);
-    }
+    if (isValueEditable(el)) return editValue(el, text, inputType, null) === "inserted";
+    if (el.isContentEditable) return editContent(el, text, inputType) !== "failed";
     return false;
   }
 
   function deleteText(el, dir) {
+    const inputType = dir < 0 ? "deleteContentBackward" : "deleteContentForward";
     if (isValueEditable(el)) {
       const v = el.value;
       let s = v.length;
@@ -773,7 +1147,6 @@
         else e = Math.min(v.length, e + 1);
       }
       if (s === e) return false;
-      const inputType = dir < 0 ? "deleteContentBackward" : "deleteContentForward";
       if (!fireBeforeInput(el, null, inputType)) return false;
       setNativeValue(el, v.slice(0, s) + v.slice(e));
       if (supportsSelection(el)) {
@@ -786,6 +1159,7 @@
     }
     if (el.isContentEditable) {
       ensureSelectionIn(el);
+      if (!fireBeforeInput(editingHost(el), null, inputType, selectionRanges())) return true; // the editor handled it
       try {
         return document.execCommand(dir < 0 ? "delete" : "forwardDelete");
       } catch {
@@ -795,25 +1169,65 @@
     return false;
   }
 
-  function clearEditable(el) {
-    if (isValueEditable(el)) {
-      if (el.value === "") return;
-      setNativeValue(el, "");
-      fireInput(el, null, "deleteContentBackward");
-      return;
+  // Visible content left in a contenteditable (zero-width placeholders do not count).
+  function hasContent(el) {
+    try {
+      return /[^\s\u200b]/.test(el.textContent || "") || !!el.querySelector("img,video,audio,iframe,hr,table,canvas,svg");
+    } catch {
+      return false;
     }
-    if (el.isContentEditable) {
-      selectContents(el);
-      let ok = false;
+  }
+
+  // clearFirst: select-all + Backspace with key, beforeinput and input events.
+  // When the page blocks that, input/textarea are cleared directly (clearFirst
+  // must clear); a contenteditable gets one plain delete command. Resolves
+  // true when the element ended up empty.
+  async function clearEditable(el) {
+    const back = keyInfo("Backspace", NO_MODS);
+    if (isValueEditable(el)) {
+      if (el.value === "") return true;
       try {
-        ok = document.execCommand("delete");
+        if (supportsSelection(el)) el.setSelectionRange(0, el.value.length);
+        else el.select();
       } catch {}
-      // `el` is (inside) the editing host itself, never an arbitrary element.
-      if (!ok && el.firstChild) {
-        el.textContent = "";
+      const downOk = el.dispatchEvent(new KeyboardEvent("keydown", keyInit(back, NO_MODS)));
+      if (downOk && fireBeforeInput(el, null, "deleteContentBackward")) {
+        setNativeValue(el, "");
         fireInput(el, null, "deleteContentBackward");
       }
+      el.dispatchEvent(new KeyboardEvent("keyup", keyInit(back, NO_MODS)));
+      if (el.value !== "") {
+        setNativeValue(el, "");
+        fireInput(el, null, "deleteContentBackward");
+      }
+      return el.value === "";
     }
+    if (el.isContentEditable) {
+      if (!hasContent(el)) return true;
+      const host = editingHost(el);
+      selectContents(el);
+      const downOk = host.dispatchEvent(new KeyboardEvent("keydown", keyInit(back, NO_MODS)));
+      let native = false;
+      if (downOk) {
+        if (fireBeforeInput(host, null, "deleteContentBackward", selectionRanges())) native = true;
+        else await yieldTask(); // the editor applies the deletion to its model, maybe asynchronously
+      }
+      host.dispatchEvent(new KeyboardEvent("keyup", keyInit(back, NO_MODS)));
+      if (native || hasContent(el)) {
+        if (!native) selectContents(el);
+        let ok = false;
+        try {
+          ok = document.execCommand("delete");
+        } catch {}
+        // `el` is (inside) the editing host itself, never an arbitrary element.
+        if (!ok && hasContent(el)) {
+          el.textContent = "";
+          fireInput(host, null, "deleteContentBackward");
+        }
+      }
+      return !hasContent(el);
+    }
+    return false;
   }
 
   function checkWritable(el) {
@@ -1088,7 +1502,9 @@
       if (editable && t.tagName === "INPUT") {
         return t.form ? implicitSubmit(t.form) : { name: "none", detail: "the input is not inside a form" };
       }
-      if (editable) return insertText(t, "\n", "insertLineBreak") ? { name: "inserted line break" } : { name: "none" };
+      // Enter in a contenteditable starts a paragraph, Shift+Enter a line break.
+      const it = !isValueEditable(t) && !mods.shift ? "insertParagraph" : "insertLineBreak";
+      if (editable) return insertText(t, "\n", it) ? { name: "inserted line break" } : { name: "none" };
       if (isActivatable(t, "Enter")) {
         t.click();
         return { name: "clicked", detail: describeShort(t) };
@@ -1141,52 +1557,138 @@
     "No browser default action was emulated for this key (page key handlers did run). If the page relies on native behaviour (shortcuts, clipboard, caret movement, scrolling), use trusted_key for real keyboard input.";
 
   // ---------- typing ----------
-  async function typeText(target, text, { delayMs = 0, clearFirst = false } = {}) {
+  const SHIFT_MODS = { ctrl: false, shift: true, alt: false, meta: false };
+  // US layout: shifted character -> its unshifted key; punctuation -> [code, keyCode].
+  const SHIFTED = {
+    "!": "1", "@": "2", "#": "3", $: "4", "%": "5", "^": "6", "&": "7", "*": "8", "(": "9", ")": "0",
+    _: "-", "+": "=", "{": "[", "}": "]", "|": "\\", ":": ";", '"': "'", "<": ",", ">": ".", "?": "/", "~": "`",
+  };
+  const PUNCT = {
+    "-": ["Minus", 189], "=": ["Equal", 187], "[": ["BracketLeft", 219], "]": ["BracketRight", 221],
+    "\\": ["Backslash", 220], ";": ["Semicolon", 186], "'": ["Quote", 222], ",": ["Comma", 188],
+    ".": ["Period", 190], "/": ["Slash", 191], "`": ["Backquote", 192],
+  };
+
+  // Key event fields for one typed character: { info: {key, code, keyCode, char}, mods }.
+  // Characters outside the US layout (accents, CJK, emoji) carry key only.
+  // A newline is Shift+Enter, the line-break key of chat composers and rich
+  // editors: an Enter-to-send handler must not fire in the middle of the text
+  // (dom_type pressEnter presses a plain Enter after the text, on request).
+  function charKey(ch) {
+    if (ch === "\n") return { info: { key: "Enter", code: "Enter", keyCode: 13, char: "\n" }, mods: SHIFT_MODS };
+    if (ch === "\t") return { info: { key: "Tab", code: "Tab", keyCode: 9, char: "\t" }, mods: NO_MODS };
+    if (ch === " ") return { info: { key: " ", code: "Space", keyCode: 32, char: " " }, mods: NO_MODS };
+    if (/^[a-zA-Z]$/.test(ch)) {
+      const up = ch.toUpperCase();
+      return { info: { key: ch, code: `Key${up}`, keyCode: up.charCodeAt(0), char: ch }, mods: ch === up ? SHIFT_MODS : NO_MODS };
+    }
+    if (/^[0-9]$/.test(ch)) return { info: { key: ch, code: `Digit${ch}`, keyCode: ch.charCodeAt(0), char: ch }, mods: NO_MODS };
+    const base = SHIFTED[ch];
+    if (base !== undefined) {
+      const digit = /^[0-9]$/.test(base);
+      const p = PUNCT[base];
+      return {
+        info: { key: ch, code: digit ? `Digit${base}` : p[0], keyCode: digit ? base.charCodeAt(0) : p[1], char: ch },
+        mods: SHIFT_MODS,
+      };
+    }
+    const p = PUNCT[ch];
+    if (p) return { info: { key: ch, code: p[0], keyCode: p[1], char: ch }, mods: NO_MODS };
+    return { info: { key: ch, code: "", keyCode: 0, char: ch }, mods: NO_MODS };
+  }
+
+  // dom_type. Every character goes through keydown -> keypress -> beforeinput
+  // -> insertion -> input -> keyup on the focused element, the order Chrome
+  // uses for a real key press, so key-driven widgets (autocomplete, masks,
+  // typeahead) react as they do to a user. Text is inserted at the caret when
+  // the element already had focus, else at the end: existing content is kept
+  // unless clearFirst. A newline is Shift+Enter inserting a line break
+  // (insertLineBreak) in a textarea or contenteditable, and is skipped in a
+  // single-line input. No timer runs unless delayMs > 0 in a visible tab:
+  // hidden and occluded tabs throttle timers to 1 s and more, so there the
+  // pauses are skipped (unpaced counts them). Resolves
+  // { inserted, prevented, maxlength, cleared, unpaced }.
+  async function typeText(target, text, { delayMs = 0, clearFirst = false, signal } = {}) {
+    const valueMode = isValueEditable(target);
+    const kbd = valueMode ? target : editingHost(target);
+    const wasFocused = deepActiveElement() === kbd;
     focusEl(target);
-    if (clearFirst) clearEditable(target);
-    if (!(delayMs > 0)) {
-      if (isValueEditable(target)) {
-        // Fast path keeps the historical semantics: the value becomes `text`.
-        setNativeValue(target, text);
-        fireInput(target, text, "insertText");
-        fireChange(target);
-      } else {
-        selectContents(target);
-        let ok = false;
-        try {
-          ok = document.execCommand("insertText", false, text);
-        } catch {}
-        if (!ok && !rangeInsert(target, text)) throw new Error("Could not insert text into the contenteditable element");
+    if (!wasFocused) {
+      try {
+        if (valueMode) {
+          if (supportsSelection(target)) target.setSelectionRange(target.value.length, target.value.length);
+        } else {
+          caretAtEnd(target);
+        }
+      } catch {}
+    }
+    const startValue = valueMode ? target.value : null;
+    const stats = { inserted: 0, prevented: 0, maxlength: 0, cleared: null, unpaced: 0 };
+    if (clearFirst) stats.cleared = await clearEditable(target);
+    const chars = Array.from(String(text).replace(/\r\n?/g, "\n"));
+    const buf = valueMode && !supportsSelection(target) ? { value: target.value } : null;
+    let since = 0;
+    for (let i = 0; i < chars.length; i++) {
+      throwIfAborted(signal);
+      if (!target.isConnected) {
+        throw new Error(`The element was removed from the page after ${stats.inserted} of ${chars.length} characters; run page_snapshot or dom_query again`);
       }
+      const ch = chars[i];
+      if (ch === "\n" && target.tagName === "INPUT") continue; // never submit while typing
+      const { info, mods } = charKey(ch);
+      const downOk = kbd.dispatchEvent(new KeyboardEvent("keydown", keyInit(info, mods)));
+      let pressOk = downOk;
+      // keypress exists for character keys and Enter, not for Tab.
+      if (downOk && ch !== "\t") pressOk = kbd.dispatchEvent(new KeyboardEvent("keypress", keypressInit(info, mods)));
+      if (downOk && pressOk) {
+        const r = valueMode
+          ? editValue(target, ch, ch === "\n" ? "insertLineBreak" : "insertText", buf)
+          : editContent(target, ch, ch === "\n" ? "insertLineBreak" : "insertText");
+        if (r === "inserted" || r === "handled") stats.inserted++;
+        else if (r === "maxlength") stats.maxlength++;
+        else stats.prevented++;
+      } else {
+        stats.prevented++;
+      }
+      kbd.dispatchEvent(new KeyboardEvent("keyup", keyInit(info, mods)));
+      if (i === chars.length - 1) break;
+      if (delayMs > 0 && document.visibilityState !== "hidden") {
+        await sleepAbortable(delayMs, signal);
+      } else if (delayMs > 0) {
+        // Hidden: a delayMs timer would take 1 s or more (a minute once the
+        // tab has been hidden for 5 minutes) and outrun the command's budget.
+        stats.unpaced++;
+        await yieldTask(signal);
+      } else if (++since >= 50) {
+        // A task boundary now and then (never a timer, see yieldTask):
+        // rendering, and a __cancel can arrive.
+        since = 0;
+        await yieldTask(signal);
+      } else {
+        // Microtasks only: framework updates queued by this keystroke
+        // (React, Vue) settle before the next one, as between real key presses.
+        await null;
+      }
+    }
+    if (valueMode && target.isConnected && target.value !== startValue) fireChange(target);
+    return stats;
+  }
+
+  // dom_fill: the field's content becomes `text` in one edit (no key events).
+  function fillText(target, text) {
+    focusEl(target);
+    if (isValueEditable(target)) {
+      setNativeValue(target, text);
+      fireInput(target, text, "insertText");
+      fireChange(target);
       return;
     }
-    // Per keystroke. Input types without a selection API (number, email, date...)
-    // sanitize partial values ("1." -> ""), so their value is rebuilt from a
-    // buffer instead of being read back from the element on every keystroke.
-    const buffered = isValueEditable(target) && !supportsSelection(target);
-    let buf = buffered ? target.value : "";
-    for (const ch of text) {
-      if (ch === "\n" && target.tagName === "INPUT") continue; // never submit while typing
-      const info = ch === "\n" ? keyInfo("Enter", NO_MODS) : keyInfo(ch, NO_MODS) || { key: ch, code: "", keyCode: 0, char: ch };
-      if (ch === "\n") info.char = "\n";
-      const downOk = target.dispatchEvent(new KeyboardEvent("keydown", keyInit(info, NO_MODS)));
-      let pressOk = downOk;
-      if (downOk) pressOk = target.dispatchEvent(new KeyboardEvent("keypress", keypressInit(info, NO_MODS)));
-      if (downOk && pressOk) {
-        if (buffered) {
-          if (fireBeforeInput(target, ch, "insertText")) {
-            buf += ch;
-            setNativeValue(target, buf);
-            fireInput(target, ch, "insertText");
-          }
-        } else {
-          insertText(target, ch, ch === "\n" ? "insertLineBreak" : "insertText");
-        }
-      }
-      target.dispatchEvent(new KeyboardEvent("keyup", keyInit(info, NO_MODS)));
-      await sleep(delayMs);
-    }
-    if (isValueEditable(target)) fireChange(target);
+    selectContents(target);
+    let ok = false;
+    try {
+      ok = document.execCommand("insertText", false, text);
+    } catch {}
+    if (!ok && !rangeInsert(target, text)) throw new Error("Could not insert text into the contenteditable element");
   }
 
   // ---------- checkbox / radio / select ----------
@@ -1343,7 +1845,7 @@
       }
     }
     const t = editableTarget(target);
-    await typeText(t, sval, { delayMs: 0 });
+    fillText(t, sval);
     if (isValueEditable(t) && t.value !== sval) {
       if (sval !== "" && t.value === "") return `error: the input rejected the value (type=${t.type || "text"})`;
       if ((t.type || "").toLowerCase() === "password") return "ok (the input normalized the value)";
@@ -1525,7 +2027,8 @@
   const MAX_WAIT_MS = 7200000;
   const READY_RANK = { loading: 0, interactive: 1, complete: 2 };
 
-  async function pageWait(payload) {
+  async function pageWait(payload, signal) {
+    throwIfAborted(signal);
     const timeout = Math.min(Math.max(Number(payload.timeoutMs) || 15000, 0), MAX_WAIT_MS);
     const t0 = Date.now();
     // Validate up front so a typo fails fast instead of timing out.
@@ -1557,6 +2060,10 @@
       return true;
     };
     const hasCondition = !!(payload.selector || payload.text || payload.url || payload.urlPattern || payload.readyState);
+    // probe: one immediate check, no waiting ({ ok:false } when it does not
+    // hold). The background re-checks the DOM condition this way once the
+    // network went idle (page_wait networkIdle).
+    if (payload.probe === true) return { ok: !hasCondition || check(), probe: true, waitedMs: 0 };
     if (hasCondition && check()) return { ok: true, waitedMs: Date.now() - t0 };
 
     const outcome = await new Promise((resolve) => {
@@ -1568,6 +2075,7 @@
       let lastCheck = 0;
       const onHide = () => finish("unloaded");
       const onState = () => schedule();
+      const onAbort = () => finish("cancelled");
       function finish(v) {
         if (done) return;
         done = true;
@@ -1577,6 +2085,7 @@
         if (observer) observer.disconnect();
         window.removeEventListener("pagehide", onHide, true);
         document.removeEventListener("readystatechange", onState);
+        if (signal) signal.removeEventListener("abort", onAbort);
         resolve(v);
       }
       function run() {
@@ -1592,6 +2101,13 @@
         pending = setTimeout(run, Math.max(0, 100 - (Date.now() - lastCheck)));
       }
       timer = setTimeout(() => finish(hasCondition ? "timeout" : "ok"), timeout);
+      if (signal) {
+        if (signal.aborted) {
+          finish("cancelled");
+          return;
+        }
+        signal.addEventListener("abort", onAbort, { once: true });
+      }
       // The document going away (navigation) ends the wait with a clean error;
       // the background re-runs URL/readyState waits on the new document.
       window.addEventListener("pagehide", onHide, true);
@@ -1608,6 +2124,7 @@
       }
       interval = setInterval(schedule, 250);
     });
+    if (outcome === "cancelled") throw cancelledError();
     if (outcome === "unloaded") {
       throw new Error("page_wait: document unloaded (navigation) before the condition was met");
     }
@@ -1885,14 +2402,16 @@
   }
 
   // ---------- commands ----------
-  async function runCommand(cmd, payload) {
+  // ctx.signal: aborted when the background cancels this command (cmdId).
+  async function runCommand(cmd, payload, ctx = {}) {
+    const signal = ctx.signal;
     switch (cmd) {
       case "page_snapshot":
         return snapshot(payload.compact !== false);
       case "page_html":
-        return (document.documentElement?.outerHTML || "").slice(0, 500000);
+        return pageSlice(document.documentElement?.outerHTML || "", payload);
       case "page_text":
-        return (document.body?.innerText || "").slice(0, 100000);
+        return pageSlice(pageTextAll(), payload);
       case "dom_query":
         return queryAll(payload.selector, payload.limit);
       case "scroll_into_view": {
@@ -1939,12 +2458,39 @@
         const el = requireOne(payload.selector);
         const target = editableTarget(el);
         scrollIntoViewCentered(target);
-        await typeText(target, payload.text == null ? "" : String(payload.text), {
-          delayMs: Number(payload.delayMs) || 0,
+        const text = payload.text == null ? "" : String(payload.text);
+        const st = await typeText(target, text, {
+          delayMs: Math.min(Math.max(Number(payload.delayMs) || 0, 0), 60000),
           clearFirst: !!payload.clearFirst,
+          signal,
         });
         const res = { ok: true, ref: refOf(target) };
         if (target !== el) res.typedInto = describeShort(target);
+        // The resulting value lets the caller verify the edit (never for passwords).
+        if (isValueEditable(target) && (target.type || "").toLowerCase() !== "password") {
+          const v = String(target.value ?? "");
+          res.value = clip(v, 200);
+          if (v.length > 200) res.valueLength = v.length;
+        }
+        const warn = [];
+        if (st.cleared === false) warn.push("clearFirst: the page kept the existing content");
+        if (st.prevented) {
+          warn.push(
+            `page key/input handlers cancelled ${st.prevented} of ${st.prevented + st.inserted + st.maxlength} characters (the page may have handled them itself; check the result)`
+          );
+        }
+        if (st.maxlength) warn.push(`${st.maxlength} characters did not fit the field's maxlength (${maxLengthOf(target)})`);
+        if (st.unpaced) {
+          warn.push(
+            `the tab was hidden (a background tab, or a minimized or covered window), where the browser throttles timers: ${st.unpaced} delayMs pauses were skipped; make the tab visible to type with pauses`
+          );
+        }
+        if (warn.length) res.warning = warn.join("; ");
+        // pressEnter: one plain Enter (no modifier) after the text, with the
+        // default action of a real press when the page does not cancel it:
+        // an input submits its form (implicit submission), a textarea gets a
+        // line break, a contenteditable a new paragraph. An Enter-to-send
+        // composer sends on its keydown. (Newlines inside text are Shift+Enter.)
         if (payload.pressEnter) {
           if (target.isConnected) focusEl(target);
           const enter = pressKey(target.isConnected ? target : deepActiveElement() || document.body, parseCombo("Enter"));
@@ -2066,7 +2612,7 @@
         return { found: true, count, firstIndex: idx };
       }
       case "page_wait":
-        return await pageWait(payload);
+        return await pageWait(payload, signal);
       case "js_evaluate":
         // CSP-safe stub: real evaluation happens in background via CDP
         // Runtime.evaluate. Never use eval/new Function here (violates
@@ -2226,7 +2772,7 @@
           throw new Error(`Invalid URL: ${payload.url}`);
         }
         if (u.protocol !== "http:" && u.protocol !== "https:") throw new Error(`Only http(s) URLs can be re-fetched: ${u.protocol}`);
-        const res = await fetch(u.href, { method: "GET", credentials: "include" });
+        const res = await fetch(u.href, { method: "GET", credentials: "include", signal });
         const body = await readBodyCapped(res, 512 * 1024);
         return {
           status: res.status,
@@ -2244,18 +2790,63 @@
   }
 
   // ---------- message router ----------
+  // Messages: { __mcp: 1, cmd, payload, cmdId? }. cmdId (string) tags a
+  // cancellable command; { __mcp: 1, cmd: "__cancel", payload: { cmdId } }
+  // aborts it, and the command then replies { ok: false, error: "cancelled" }.
+  const runningCmds = new Map(); // cmdId -> AbortController
+  // A cancel can overtake its command (the background may still be injecting
+  // this script, or sends the cancel to every frame): recent cancels are
+  // remembered so a late command fails at once instead of running.
+  const recentCancels = new Map(); // cmdId -> time
+  const CANCEL_MEMORY_MS = 60000;
+  const CANCEL_MEMORY_MAX = 256;
+
+  function cmdIdOf(v) {
+    if (typeof v === "string" && v) return v.slice(0, 128);
+    if (typeof v === "number" && Number.isFinite(v)) return String(v);
+    return null;
+  }
+
+  function rememberCancel(id) {
+    const now = Date.now();
+    for (const [k, t] of recentCancels) {
+      if (now - t > CANCEL_MEMORY_MS || recentCancels.size >= CANCEL_MEMORY_MAX) recentCancels.delete(k);
+      else break;
+    }
+    recentCancels.set(id, now);
+  }
+
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (!msg || msg.__mcp == null) return false;
     // Legacy sticky-frame filter: the background now targets frames by frameId,
     // but older senders may still pass a URL substring.
     if (msg.__frameUrl && !(location.href || "").includes(msg.__frameUrl)) return false;
+    if (msg.cmd === "__cancel") {
+      const id = cmdIdOf(msg.payload && msg.payload.cmdId);
+      const ac = id ? runningCmds.get(id) : null;
+      if (ac) ac.abort();
+      else if (id) rememberCancel(id);
+      try {
+        sendResponse({ ok: true, result: { cancelled: !!ac } });
+      } catch {}
+      return false;
+    }
+    const cmdId = cmdIdOf(msg.cmdId);
+    const ac = new AbortController();
+    if (cmdId) {
+      if (recentCancels.has(cmdId)) ac.abort();
+      else runningCmds.set(cmdId, ac);
+    }
     (async () => {
       let reply;
       try {
-        const result = await runCommand(msg.cmd, msg.payload && typeof msg.payload === "object" ? msg.payload : {});
+        throwIfAborted(ac.signal);
+        const result = await runCommand(msg.cmd, msg.payload && typeof msg.payload === "object" ? msg.payload : {}, { signal: ac.signal });
         reply = { ok: true, result };
       } catch (e) {
-        reply = { ok: false, error: String((e && e.message) || e) };
+        reply = { ok: false, error: ac.signal.aborted ? "cancelled" : String((e && e.message) || e) };
+      } finally {
+        if (cmdId && runningCmds.get(cmdId) === ac) runningCmds.delete(cmdId);
       }
       try {
         sendResponse(reply);
