@@ -265,6 +265,14 @@ export class ChromeMock {
           return { ...t };
         },
         sendMessage: (tabId: number, msg: any, options?: { frameId?: number }) => this.sendToContent(tabId, msg, options?.frameId ?? 0),
+        // A new tab (next free id) in window 1 unless windowId is given; an active one deactivates its window's other tabs.
+        create: async (props: { url?: string; active?: boolean; windowId?: number } = {}) => {
+          const id = Math.max(0, ...this.tabs.keys()) + 1;
+          const t: MockTab = { id, windowId: props.windowId ?? 1, url: props.url ?? "about:blank", title: "", status: "complete", active: props.active !== false };
+          if (t.active) for (const o of this.tabs.values()) if (o.windowId === t.windowId) o.active = false;
+          this.tabs.set(id, t);
+          return { ...t };
+        },
         reload: async (tabId: number) => {
           // A reload "finishes" shortly after: perf_web_vitals {reload} waits for it.
           setTimeout(() => {

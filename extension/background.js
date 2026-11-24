@@ -21,7 +21,9 @@ const networkMap = new Map(); // requestId -> entry for O(1) lookups
 const dialogEvents = []; // {kind,message,url,tabId,frameId,ts,response}
 const MAX = 1000;
 
-const commandHistory = []; // { id, action, ok, error, durationMs, time, tabId }
+// { id, action, ok, error, durationMs, time, tabId, host, detail } (memory only;
+// host/detail: see commandHost / historyDetail)
+const commandHistory = [];
 const MAX_HISTORY = 50;
 function recordCommandHistory(entry) {
   commandHistory.unshift(entry);
@@ -676,9 +678,11 @@ function onSocketMessage(sock, raw) {
 }
 
 // ---------- cancellation ----------
-// Running bridge commands: String(id) -> { ac, sock, ctx }. {type:"cancel", id}
-// from the socket that sent the command (or that socket going away) aborts
-// ctx.signal; the command then answers { id, ok:false, error:"cancelled" }.
+// Running bridge commands: String(id) -> { ac, sock, ctx, id, action, tabId,
+// startedAt, host }. {type:"cancel", id} from the socket that sent the command
+// (or that socket going away, or the popup's mcp-stop-all) aborts ctx.signal;
+// the command then answers { id, ok:false, error:"cancelled" }. The popup sees
+// id/action/tabId/host/startedAt (mcp-status "running").
 const runningCmds = new Map();
 
 function cancelledError() {
@@ -764,8 +768,20 @@ async function runBridgeCommand(sock, msg) {
     mayNavigate: !NON_NAVIGATING_ACTIONS.has(normalizeAction(msg.action)),
   };
   const key = String(msg.id);
-  const entry = { ac, sock, ctx };
+  // host: undefined until the lookup below settles.
+  const entry = { ac, sock, ctx, id: key, action: msg.action, tabId: tabId ?? null, startedAt: start, host: undefined };
   runningCmds.set(key, entry);
+  // Popup bookkeeping (running list + history). The host lookup runs beside
+  // the command and never delays it; the detail is computed from the payload
+  // as it arrived (see historyDetail for what may appear there).
+  const hostLookup = commandHost(msg.action, tabId, payload).then(
+    (h) => (entry.host = h),
+    () => (entry.host = "")
+  );
+  let detail = "";
+  try {
+    detail = historyDetail(msg.action, payload);
+  } catch {}
   let ok = true;
   let errStr = null;
   // Replies always go to the socket the command arrived on.
@@ -796,16 +812,175 @@ async function runBridgeCommand(sock, msg) {
     if (runningCmds.get(key) === entry) runningCmds.delete(key);
     const now = Date.now();
     for (const id of ctx.touched) tabTouch.set(id, now);
+    // The reply has been sent: a host lookup still pending gets a short grace.
+    const host = entry.host !== undefined ? entry.host : await settleWithin(hostLookup, HISTORY_HOST_WAIT_MS, "");
     recordCommandHistory({
       id: msg.id,
       action: msg.action,
       ok,
       error: errStr,
-      durationMs: Date.now() - start,
-      time: Date.now(),
+      durationMs: now - start,
+      time: now,
       tabId: msg.tabId ?? null,
+      host: typeof host === "string" ? host : "",
+      detail,
     });
   }
+}
+
+// ---------- popup bookkeeping: command host + safe detail ----------
+const HISTORY_HOST_WAIT_MS = 300;
+const HISTORY_DETAIL_MAX = 120;
+const HISTORY_SELECTOR_MAX = 80;
+
+// Resolves p's value, or `fallback` once ms have passed (or when p rejects).
+function settleWithin(p, ms, fallback) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(fallback), ms);
+    Promise.resolve(p).then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(fallback);
+      }
+    );
+  });
+}
+
+// Hostname of an http(s) or file URL; "" for every other scheme and for
+// anything unparsable. Never a path, query or credentials.
+function urlHostname(url) {
+  try {
+    const u = new URL(String(url || ""));
+    if (u.protocol !== "http:" && u.protocol !== "https:" && u.protocol !== "file:") return "";
+    return capStr(u.hostname, 253);
+  } catch {
+    return "";
+  }
+}
+
+// Actions that do not act on "the active tab" when no tabId is given (the
+// browser, a window, global buffers or another API): their host is the
+// explicit target's, else "".
+const TABLESS_ACTIONS = new Set([
+  "tabs_list", "window_list", "window_create", "window_focus", "browser_close",
+  "tab_group_create", "tab_group_list", "tab_group_update", "tab_group_ungroup",
+  "console_get", "console_clear", "network_requests", "network_clear",
+  "downloads_list", "downloads_pause", "downloads_resume", "downloads_cancel", "downloads_erase",
+  "bookmarks_search", "bookmarks_list", "bookmarks_add", "bookmarks_remove",
+  "cookies_list", "cookies_get", "cookies_set", "cookies_delete", "cookies_clear", "cookies_export", "cookies_import",
+  "sessions_recently_closed", "sessions_restore", "dialog_policy", "dialog_get", "dialog_clear",
+  "clipboard_read", "clipboard_write", "browsing_data_clear", "notification_create", "notification_clear",
+  "perf_trace_chunk", "history_search", "history_delete",
+]);
+
+// Hostname of the tab a command acts on: the explicit tabId, else the active
+// tab of the last focused window (the active-tab fallback). tab_create acts on
+// the tab it opens: the target URL's hostname. "" when none / unknown.
+async function commandHost(action, tabId, payload) {
+  const a = normalizeAction(action);
+  if (!PERM_ALL_SET.has(a)) return "";
+  if (a === "tab_create") return urlHostname(bg2aNormalizeUrl(payload && payload.url));
+  if (Number.isInteger(tabId) && tabId >= 0) {
+    const t = await chrome.tabs.get(tabId);
+    return urlHostname(t && (t.url || t.pendingUrl));
+  }
+  if (TABLESS_ACTIONS.has(a)) return "";
+  const [t] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  return urlHostname(t && (t.url || t.pendingUrl));
+}
+
+// A selector/ref for the popup: whitespace and control characters collapsed, capped.
+function histSelector(v) {
+  if (typeof v !== "string") return "";
+  return capStr(v.replace(/[\s\u0000-\u001f\u007f]+/g, " ").trim(), HISTORY_SELECTOR_MAX);
+}
+
+function histJoin(...parts) {
+  return parts.filter((p) => p !== "").join(" · ");
+}
+
+function histLength(v) {
+  return v == null ? 0 : String(v).length;
+}
+
+// Named keys (keyboard_press / trusted_key) that may be shown by name.
+const HISTORY_NAMED_KEY_RE =
+  /^(?:Enter|Return|Tab|Escape|Esc|Backspace|Delete|Del|Insert|Space|Spacebar|ArrowUp|ArrowDown|ArrowLeft|ArrowRight|Up|Down|Left|Right|Home|End|PageUp|PageDown|F(?:[1-9]|1[0-9]|2[0-4])|ContextMenu|CapsLock|NumLock|ScrollLock|Pause|PrintScreen)$/i;
+const HISTORY_KEY_MODS = new Set(["ctrl", "control", "shift", "alt", "option", "opt", "meta", "cmd", "command", "win", "windows", "super", "os"]);
+
+// The key name for a named key ("Enter", "Shift+Tab") or a shortcut with
+// Ctrl/Alt/Meta ("Ctrl+K"); anything that could be typed text is "1 key".
+function histKey(k) {
+  if (typeof k !== "string" || !k) return "";
+  const parts = k.split("+");
+  const main = parts.pop().trim();
+  const mods = parts.map((p) => p.trim().toLowerCase());
+  if (!mods.every((m) => HISTORY_KEY_MODS.has(m))) return "1 key";
+  if (main.length > 1 && HISTORY_NAMED_KEY_RE.test(main)) return capStr(k.trim(), 40);
+  const shortcut = mods.some((m) => m !== "shift");
+  if (shortcut && main.length === 1 && /^[A-Za-z0-9]$/.test(main)) return capStr(k.trim(), 40);
+  return "1 key";
+}
+
+// A cookie domain filter ("example.com", ".example.com"), else "".
+function histDomain(v) {
+  if (typeof v !== "string") return "";
+  const d = v.trim();
+  return /^\.?[a-z0-9_-]+(?:\.[a-z0-9_-]+)*\.?$/i.test(d) ? capStr(d, HISTORY_SELECTOR_MAX) : "";
+}
+
+const SELECTOR_DETAIL_ACTIONS = new Set([
+  "dom_click", "dom_select", "dom_check", "dom_hover", "dom_focus", "dom_scroll", "page_wait", "page_screenshot",
+  "trusted_click", "trusted_scroll",
+]);
+
+// Short, SAFE summary of a command for the popup history (max 120 chars, ""
+// when nothing applies). An allow-list per action: selectors, lengths, counts,
+// hostnames, named keys and CDP method names only. Never typed text, field
+// values, cookie / storage / clipboard values, code, CDP params, file paths,
+// or URL paths and queries.
+function historyDetail(action, payload) {
+  const a = normalizeAction(action);
+  const p = payload && typeof payload === "object" ? payload : {};
+  let d = "";
+  if (a === "tab_create" || a === "tab_navigate") {
+    d = urlHostname(bg2aNormalizeUrl(p.url));
+  } else if (SELECTOR_DETAIL_ACTIONS.has(a)) {
+    d = histSelector(p.selector);
+  } else if (a === "dom_drag") {
+    d = histSelector(p.from);
+  } else if (a === "dom_type" || a === "trusted_type") {
+    d = histJoin(histSelector(p.selector), `${histLength(p.text)} chars`);
+  } else if (a === "dom_fill") {
+    if (typeof p.selector === "string") {
+      d = histJoin(histSelector(p.selector), p.value != null ? `${histLength(p.value)} chars` : "");
+    } else if (p.fields && typeof p.fields === "object" && !Array.isArray(p.fields)) {
+      // The MCP tool sends { fields: { selector: value } }.
+      const entries = Object.entries(p.fields);
+      if (entries.length === 1) {
+        const [sel, val] = entries[0];
+        d = histJoin(histSelector(sel), val != null ? `${histLength(val)} chars` : "");
+      } else if (entries.length > 1) {
+        const sels = capStr(entries.map(([sel]) => histSelector(sel)).join(", "), HISTORY_SELECTOR_MAX);
+        d = histJoin(sels, `${entries.length} fields`);
+      }
+    }
+  } else if (a === "dom_upload") {
+    d = histJoin(histSelector(p.selector), `${Array.isArray(p.filePaths) ? p.filePaths.length : 0} files`);
+  } else if (a === "keyboard_press" || a === "trusted_key") {
+    d = histKey(p.key);
+  } else if (a === "js_evaluate") {
+    d = `${histLength(p.expression)} chars of code`;
+  } else if (a === "cdp_send") {
+    d = typeof p.method === "string" && /^[A-Za-z][A-Za-z0-9]*\.[A-Za-z][A-Za-z0-9]*$/.test(p.method) ? capStr(p.method, HISTORY_SELECTOR_MAX) : "";
+  } else if (a.startsWith("cookies_")) {
+    d = histDomain(p.domain) || urlHostname(p.url);
+  }
+  return capStr(d, HISTORY_DETAIL_MAX);
 }
 
 function schedule(delayMs) {
@@ -1356,9 +1531,13 @@ async function runInMainWorld(tabId, func, args) {
   } catch {}
 }
 
+// Dialogs are answered only while dialog_policy is switched on: with it off
+// (e.g. after the popup's Stop agent) agent tabs get native dialogs back, as
+// when the bridge is down; switching it on again re-arms the agent's policy
+// (setDisabled -> refreshAgentHooks).
 function dialogHookPolicy() {
   return {
-    passthrough: false,
+    passthrough: !(permsLoaded && isAllowed("dialog_policy")),
     accept: dialogPolicy.accept !== false,
     promptText: String(dialogPolicy.promptText || ""),
     blockUnload: !!dialogPolicy.blockUnload,
@@ -2566,10 +2745,16 @@ function resolvePermNames(name) {
 // "mcpDisabled", next to "mcpKnownActions" (the catalog the user last saw).
 let disabledActions = new Set();
 let permsLoaded = false;
+// Actions the agent switched off itself (bridge perm_set) that the user has
+// not switched since: the popup marks them "off by agent". Always a subset of
+// disabledActions. Persisted in chrome.storage.local "mcpAgentDisabled"
+// (written together with mcpDisabled by savePerms); the in-memory set is
+// authoritative, a foreign write to the key is overwritten.
+let agentDisabledActions = new Set();
 
 async function loadPerms() {
   try {
-    const got = await chrome.storage.local.get(["mcpDisabled", "mcpKnownActions"]);
+    const got = await chrome.storage.local.get(["mcpDisabled", "mcpKnownActions", "mcpAgentDisabled"]);
     const arr = got && got.mcpDisabled;
     const next = new Set(Array.isArray(arr) ? arr.filter((a) => PERM_ALL_SET.has(a)) : []);
     const storedKnown = got && got.mcpKnownActions;
@@ -2586,6 +2771,8 @@ async function loadPerms() {
       added = true;
     }
     disabledActions = next;
+    const agentArr = got && got.mcpAgentDisabled;
+    agentDisabledActions = new Set(Array.isArray(agentArr) ? agentArr.filter((a) => PERM_ALL_SET.has(a) && next.has(a)) : []);
     const knownChanged = !Array.isArray(storedKnown) || storedKnown.length !== PERM_ALL.length || PERM_ALL.some((a) => !known.has(a));
     if (added || knownChanged) {
       // One write: the new disabled set never lands without the catalog it was computed for.
@@ -2638,8 +2825,22 @@ async function savePerms() {
   const v = Array.from(disabledActions);
   noteOwnPermWrite(v);
   try {
-    await chrome.storage.local.set({ mcpDisabled: v });
+    // One write: a popup reacting to the mcpDisabled change reads the matching agent set.
+    await chrome.storage.local.set({ mcpDisabled: v, mcpAgentDisabled: Array.from(agentDisabledActions) });
   } catch {}
+}
+
+// Re-asserts the in-memory agent-disabled set over a foreign storage write.
+function saveAgentDisabled() {
+  try {
+    Promise.resolve(chrome.storage.local.set({ mcpAgentDisabled: Array.from(agentDisabledActions) })).catch(() => {});
+  } catch {}
+}
+
+function sameActionList(raw, set) {
+  if (!Array.isArray(raw)) return false;
+  const s = new Set(raw);
+  return s.size === raw.length && s.size === set.size && raw.every((a) => set.has(a));
 }
 
 function isAllowed(action) {
@@ -2654,6 +2855,8 @@ function setDisabled(next, persist) {
   const newlyOff = new Set(Array.from(next).filter((a) => !disabledActions.has(a)));
   const changed = next.size !== disabledActions.size || newlyOff.size > 0;
   disabledActions = next;
+  // An action switched back on is no longer "off by agent".
+  for (const a of agentDisabledActions) if (!next.has(a)) agentDisabledActions.delete(a);
   if (persist) savePerms();
   if (changed) {
     sendPermsEvent();
@@ -2661,6 +2864,9 @@ function setDisabled(next, persist) {
   }
   if (newlyOff.size) {
     teardownDebugSessions((k) => k.actions.some((a) => newlyOff.has(a))).catch(() => {});
+  }
+  if (newlyOff.has("tab_audio_record_start") || newlyOff.has("tab_audio_record_stop")) {
+    discardAudioRecordings().catch(() => {});
   }
 }
 
@@ -2688,6 +2894,12 @@ if (chrome.storage && chrome.storage.onChanged) {
         setDisabled(new Set([...disabledActions, ...nv]), false);
         if (dropped) savePerms();
       }
+    }
+    // mcpAgentDisabled: only this worker writes it. Our own echoes match
+    // the in-memory set (or an older one of ours, then re-saving is a no-op);
+    // anything else is overwritten.
+    if (changes.mcpAgentDisabled && permsLoaded && !sameActionList(changes.mcpAgentDisabled.newValue, agentDisabledActions)) {
+      saveAgentDisabled();
     }
     // mcpPort is deliberately not applied from storage: the popup's
     // mcp-port-set message (extension pages only) calls setPort() itself, and
@@ -2765,7 +2977,40 @@ function onPageEvent(type, entry, sender) {
   });
 }
 
-function statusPayload(t) {
+// Popup status lists (mcp-status).
+const STATUS_MAX_RUNNING = 10;
+const STATUS_MAX_AGENT_TABS = 20;
+
+// Running bridge commands, newest first.
+function runningPayload() {
+  return Array.from(runningCmds.values())
+    .reverse()
+    .slice(0, STATUS_MAX_RUNNING)
+    .map((e) => ({
+      id: capStr(e.id, 64),
+      action: capStr(e.action, 64),
+      tabId: Number.isInteger(e.tabId) ? e.tabId : null,
+      host: typeof e.host === "string" ? e.host : "",
+      startedAt: e.startedAt,
+    }));
+}
+
+// Agent tabs (not the fallback tabs) that still exist.
+async function agentTabsPayload() {
+  const ids = Array.from(agentTabs).slice(-STATUS_MAX_AGENT_TABS);
+  const tabs = await Promise.all(ids.map((id) => Promise.resolve().then(() => chrome.tabs.get(id)).catch(() => null)));
+  return tabs
+    .filter((t) => t && Number.isInteger(t.id))
+    .map((t) => ({
+      id: t.id,
+      windowId: t.windowId,
+      title: capStr(t.title || "", 120),
+      host: urlHostname(t.url || t.pendingUrl),
+      active: !!t.active,
+    }));
+}
+
+function statusPayload(t, agentTabList) {
   const connected = bridgeOpen();
   return {
     bridgeConnected: connected,
@@ -2779,6 +3024,8 @@ function statusPayload(t) {
     serverProtocol: serverInfo.protocol,
     serverPid: serverInfo.pid,
     hasKey: !!pairing.key,
+    running: runningPayload(),
+    agentTabs: Array.isArray(agentTabList) ? agentTabList : [],
   };
 }
 
@@ -2792,6 +3039,7 @@ const PRIVILEGED_MSGS = new Set([
   "mcp-perms-set",
   "mcp-repair",
   "mcp-forget-pairing",
+  "mcp-stop-all",
 ]);
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -2804,9 +3052,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === "mcp-status") {
     pairingReady
       .catch(() => {})
-      .then(() => chrome.tabs.query({ active: true, lastFocusedWindow: true }))
-      .then(([t]) => sendResponse(statusPayload(t)))
-      .catch(() => sendResponse(statusPayload(null)));
+      .then(() => stateReady)
+      .then(() =>
+        Promise.all([
+          chrome.tabs.query({ active: true, lastFocusedWindow: true }).then(([t]) => t, () => null),
+          agentTabsPayload().catch(() => []),
+        ])
+      )
+      .then(([t, tabs]) => sendResponse(statusPayload(t, tabs)))
+      .catch(() => sendResponse(statusPayload(null, [])));
     return true;
   }
   if (msg.type === "mcp-repair") {
@@ -2862,26 +3116,54 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
   if (msg.type === "mcp-perms-get") {
-    permsReady.then(() => sendResponse({ cats: PERM_CATS, disabled: Array.from(disabledActions), requires: REQUIRES }));
+    permsReady.then(() =>
+      sendResponse({
+        cats: PERM_CATS,
+        disabled: Array.from(disabledActions),
+        requires: REQUIRES,
+        agentDisabled: Array.from(agentDisabledActions),
+      })
+    );
     return true;
   }
   if (msg.type === "mcp-perms-set") {
     // {action, enabled} single delta or {actions:{name:bool}} (only the changed ones)
     permsReady.then(() => {
       const next = new Set(disabledActions);
+      // Every action the user names (on or off) is the user's choice from now on.
       if (typeof msg.action === "string" && PERM_ALL.includes(msg.action)) {
         if (msg.enabled) next.delete(msg.action);
         else next.add(msg.action);
+        agentDisabledActions.delete(msg.action);
       }
       if (msg.actions && typeof msg.actions === "object") {
         for (const [a, on] of Object.entries(msg.actions)) {
           if (!PERM_ALL.includes(a)) continue;
           if (on) next.delete(a);
           else next.add(a);
+          agentDisabledActions.delete(a);
         }
       }
       setDisabled(next, true);
-      sendResponse({ ok: true, disabled: Array.from(disabledActions) });
+      sendResponse({ ok: true, disabled: Array.from(disabledActions), agentDisabled: Array.from(agentDisabledActions) });
+    });
+    return true;
+  }
+  if (msg.type === "mcp-stop-all") {
+    // Emergency stop: every switch off (debugger-backed sessions are torn
+    // down by setDisabled), the agent marks cleared (the user decided), and
+    // every running command aborted (it answers "cancelled"). Switching off
+    // first means no new command passes the gate meanwhile.
+    permsReady.then(() => {
+      agentDisabledActions.clear();
+      setDisabled(new Set(PERM_ALL), true);
+      let cancelled = 0;
+      for (const e of Array.from(runningCmds.values())) {
+        if (e.ac.signal.aborted) continue;
+        e.ac.abort();
+        cancelled++;
+      }
+      sendResponse({ ok: true, cancelled, disabled: Array.from(disabledActions) });
     });
     return true;
   }
@@ -3214,6 +3496,40 @@ async function bg2bOffscreen(msg, what) {
   const res = await chrome.runtime.sendMessage(msg);
   if (!res || !res.ok) throw new Error((res && res.error) || `Offscreen document failed to ${what}`);
   return res;
+}
+
+// A recording must not outlive its switches: once tab_audio_record_start or
+// tab_audio_record_stop is off (the popup's Stop agent switches everything
+// off), every recording in the offscreen document is released, which stops
+// the recorder, frees the capture stream and drops the data, so switching
+// them on again cannot hand the agent audio captured meanwhile. A start in
+// flight checks audioDiscards when it returns. No document: nothing records.
+let audioDiscards = 0;
+async function discardAudioRecordings() {
+  audioDiscards++;
+  const off = chrome.offscreen;
+  try {
+    if (!off || (off.hasDocument && !(await off.hasDocument()))) return;
+  } catch {
+    return;
+  }
+  let list = null;
+  try {
+    list = await chrome.runtime.sendMessage({ type: "mcp-offscreen-audio-list" });
+  } catch {}
+  if (!list || !list.ok) return;
+  // tabIds: recording or not retrieved yet; recordings: every entry kept.
+  const ids = new Set(Array.isArray(list.tabIds) ? list.tabIds : []);
+  for (const r of Array.isArray(list.recordings) ? list.recordings : []) if (r) ids.add(r.tabId);
+  await Promise.all(
+    Array.from(ids)
+      .filter((id) => Number.isInteger(id))
+      .map(async (tabId) => {
+        try {
+          await chrome.runtime.sendMessage({ type: "mcp-offscreen-audio-release", tabId });
+        } catch {}
+      })
+  );
 }
 
 // ---------- BG2a helpers: URLs, page_wait, trusted input, keys, AX tree, clipboard ----------
@@ -4570,6 +4886,8 @@ async function handleCommand(action, payload, tabId, ctx = {}) {
       const targets = resolvePermNames(a);
       if (!targets.length) throw new Error(`Unknown permission: ${a}`);
       if (payload.enabled) throw new Error("Re-enabling a permission is only possible from the extension popup");
+      // The popup shows what the agent switched off (only switches it turned off now).
+      for (const t of targets) if (!disabledActions.has(t)) agentDisabledActions.add(t);
       setDisabled(new Set([...disabledActions, ...targets]), true);
       if (targets.length === 1 && targets[0] === a) return { ok: true, action: a, enabled: false };
       return { ok: true, action: a, actions: targets, enabled: false };
@@ -4884,6 +5202,7 @@ async function handleCommand(action, payload, tabId, ctx = {}) {
     }
 
     case "tab_audio_record_start": {
+      const discards = audioDiscards;
       const id = tabId ?? (await activeTabId(ctx));
       // Reuses the offscreen document: recordings of other tabs keep running.
       await ensureOffscreen();
@@ -4903,15 +5222,21 @@ async function handleCommand(action, payload, tabId, ctx = {}) {
       if (!res || !res.ok) {
         throw new Error(res?.error || "Failed to start tab audio recording in offscreen document");
       }
-      // Cancelled while starting: the caller already got "cancelled" and will
-      // never send the stop, and an active recording has no time limit, so
-      // stop and release it here instead of leaving the tab recorded.
-      if (ctx && ctx.signal && ctx.signal.aborted) {
+      // Cancelled while starting (the caller already got "cancelled" and will
+      // never send the stop), or its switches went off meanwhile (that
+      // discard ran before this recording existed): an active recording has
+      // no time limit, so stop and release it here instead of leaving the tab
+      // recorded.
+      const aborted = !!(ctx && ctx.signal && ctx.signal.aborted);
+      if (aborted || audioDiscards !== discards) {
         try {
           await bg2bOffscreen({ type: "mcp-offscreen-audio-stop", tabId: id }, "stop the tab audio recording");
+        } catch {}
+        try {
           await chrome.runtime.sendMessage({ type: "mcp-offscreen-audio-release", tabId: id });
         } catch {}
-        throw cancelledError();
+        if (aborted) throw cancelledError();
+        throw new Error("Tab audio recording was switched off in the extension while it started; the recording was discarded");
       }
       return { ok: true, tabId: id, recording: true, startedAt: res.startedAt, mimeType: res.mimeType };
     }
