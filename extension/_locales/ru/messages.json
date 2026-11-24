@@ -151,6 +151,114 @@
     "message": "MCP-сервер закрыл соединение",
     "description": "Notice title when the MCP server closed the connection with another code"
   },
+  "statusActionNeeded": {
+    "message": "Требуется действие",
+    "description": "Status badge when the user must decide whether to accept a new pairing offer"
+  },
+  "statusUntrustedServer": {
+    "message": "Сервер не проверен",
+    "description": "Status badge when the program on the port could not prove it is the paired MCP server"
+  },
+  "statusUpdateNeeded": {
+    "message": "Нужно обновление",
+    "description": "Status badge when the extension and MCP server protocol versions differ"
+  },
+  "pairInfoHandshake": {
+    "message": "Проверка MCP-сервера…",
+    "description": "Pairing status line while the server is being verified"
+  },
+  "pairInfoHasKey": {
+    "message": "В этом браузере сохранён ключ сопряжения",
+    "description": "Pairing status line when not connected but a pairing key is stored"
+  },
+  "pairInfoNoKey": {
+    "message": "Сопряжение ещё не выполнено",
+    "description": "Pairing status line when this browser has never been paired"
+  },
+  "pairInfoNoKeyTitle": {
+    "message": "Первый MCP-сервер, предложивший сопряжение, получает доверие автоматически.",
+    "description": "Tooltip of the not-paired status line (trust on first use)"
+  },
+  "serverVersionLabel": {
+    "message": "Сервер",
+    "description": "Prefix before the MCP server version number (e.g. \"Server v0.3.5\")"
+  },
+  "btnForgetPairing": {
+    "message": "Забыть сопряжение",
+    "description": "Small action that deletes the stored pairing key"
+  },
+  "btnForgetConfirm": {
+    "message": "Нажмите ещё раз, чтобы забыть",
+    "description": "Forget-pairing action after the first click: asks for a confirming second click"
+  },
+  "forgetPairingTitle": {
+    "message": "Удаляет ключ сопряжения этого браузера и переподключается. Следующий MCP-сервер, предложивший сопряжение, получит доверие автоматически.",
+    "description": "Tooltip of the forget-pairing action"
+  },
+  "pairRepairTitle": {
+    "message": "MCP-сервер просит выполнить сопряжение заново",
+    "description": "Notice title when the server offered a new pairing and the extension declined it"
+  },
+  "pairRepairBody": {
+    "message": "Сервер на этом порту предложил новый ключ сопряжения, но этот браузер уже сопряжён с другим ключом. Нажимайте «Сопрячь заново», только если вы сами сбросили или переустановили MCP-сервер; иначе другая программа может выдавать себя за него.",
+    "description": "Notice text for the re-pair offer; must name the Re-pair button (btnRepair)"
+  },
+  "btnRepair": {
+    "message": "Сопрячь заново",
+    "description": "Button that accepts the next pairing offer from the server"
+  },
+  "btnRepairing": {
+    "message": "Ожидание сервера…",
+    "description": "Re-pair button label while waiting for the server"
+  },
+  "repairTitle": {
+    "message": "Принять следующее предложение сопряжения от сервера (в течение 2 минут) и переподключиться сейчас",
+    "description": "Tooltip of the Re-pair button"
+  },
+  "pairClosedTitle": {
+    "message": "Сопряжение на MCP-сервере закрыто",
+    "description": "Notice title when the server refuses new pairings (close code 4004)"
+  },
+  "pairClosedBody": {
+    "message": "Сервер уже сопряжён с другой установкой. Запустите сервер один раз с --pair (или BROWSER_MCP_PAIR=1) либо удалите extension-keys.json в каталоге конфигурации сервера.",
+    "description": "Notice text for pairing-closed; keep --pair, BROWSER_MCP_PAIR=1 and extension-keys.json unchanged"
+  },
+  "pairKeysFileLabel": {
+    "message": "Файл сопряжения (каталог конфигурации сервера по умолчанию):",
+    "description": "Label above the default path of the server pairing file"
+  },
+  "serverAuthFailedTitle": {
+    "message": "Сервер не смог подтвердить свою подлинность",
+    "description": "Notice title when the server failed the pairing challenge (close code 4101)"
+  },
+  "serverAuthFailedBody": {
+    "message": "У программы на этом порту нет ключа сопряжения этого браузера, поэтому команды не выполнялись. Если вы сбросили данные сопряжения сервера, удалите extension-keys.json в каталоге конфигурации сервера, перезапустите сервер и нажмите здесь «Сопрячь заново», когда появится запрос. Иначе на этом порту может работать другая программа.",
+    "description": "Notice text for server-auth-failed; keep extension-keys.json unchanged and name the Re-pair button"
+  },
+  "authFailedTitle": {
+    "message": "MCP-сервер отклонил подтверждение сопряжения этого браузера",
+    "description": "Notice title when the server rejected the extension proof (close code 4005)"
+  },
+  "authFailedBody": {
+    "message": "У сервера другой ключ сопряжения для этого браузера. Удалите extension-keys.json в каталоге конфигурации сервера, перезапустите сервер и нажмите здесь «Сопрячь заново», когда появится запрос.",
+    "description": "Notice text for auth-failed; keep extension-keys.json unchanged and name the Re-pair button"
+  },
+  "protocolMismatchTitle": {
+    "message": "Версии расширения и MCP-сервера не совпадают",
+    "description": "Notice title when the bridge protocol versions differ"
+  },
+  "protocolUpdateServer": {
+    "message": "MCP-сервер старше этого расширения. Обновите MCP-сервер до той же версии, что и расширение, и перезапустите его.",
+    "description": "Protocol mismatch advice: the server is outdated"
+  },
+  "protocolUpdateExtension": {
+    "message": "Это расширение старше MCP-сервера. Обновите расширение до той же версии, что и сервер, и перезагрузите его.",
+    "description": "Protocol mismatch advice: the extension is outdated"
+  },
+  "protocolUpdateBoth": {
+    "message": "Расширение и MCP-сервер используют разные версии протокола. Обновите оба до одной версии.",
+    "description": "Protocol mismatch advice when the outdated side is unknown"
+  },
   "cat_tabs": {
     "message": "Вкладки и окна",
     "description": "Category: Tabs & Windows"
@@ -226,5 +334,13 @@
   "cat_system": {
     "message": "Система",
     "description": "Category: System"
+  },
+  "cat_emulation": {
+    "message": "Эмуляция",
+    "description": "Category: Emulation"
+  },
+  "cat_performance": {
+    "message": "Производительность",
+    "description": "Category: Performance"
   }
 }

@@ -151,6 +151,114 @@
     "message": "MCPサーバーが接続を切断しました",
     "description": "Notice title when the MCP server closed the connection with another code"
   },
+  "statusActionNeeded": {
+    "message": "操作が必要",
+    "description": "Status badge when the user must decide whether to accept a new pairing offer"
+  },
+  "statusUntrustedServer": {
+    "message": "未検証のサーバー",
+    "description": "Status badge when the program on the port could not prove it is the paired MCP server"
+  },
+  "statusUpdateNeeded": {
+    "message": "更新が必要",
+    "description": "Status badge when the extension and MCP server protocol versions differ"
+  },
+  "pairInfoHandshake": {
+    "message": "MCPサーバーを検証中…",
+    "description": "Pairing status line while the server is being verified"
+  },
+  "pairInfoHasKey": {
+    "message": "このブラウザはペアリングキーを保持しています",
+    "description": "Pairing status line when not connected but a pairing key is stored"
+  },
+  "pairInfoNoKey": {
+    "message": "未ペアリング",
+    "description": "Pairing status line when this browser has never been paired"
+  },
+  "pairInfoNoKeyTitle": {
+    "message": "最初にペアリングを提示したMCPサーバーが自動的に信頼されます。",
+    "description": "Tooltip of the not-paired status line (trust on first use)"
+  },
+  "serverVersionLabel": {
+    "message": "サーバー",
+    "description": "Prefix before the MCP server version number (e.g. \"Server v0.3.5\")"
+  },
+  "btnForgetPairing": {
+    "message": "ペアリングを解除",
+    "description": "Small action that deletes the stored pairing key"
+  },
+  "btnForgetConfirm": {
+    "message": "もう一度クリックして解除",
+    "description": "Forget-pairing action after the first click: asks for a confirming second click"
+  },
+  "forgetPairingTitle": {
+    "message": "このブラウザのペアリングキーを削除して再接続します。次にペアリングを提示したMCPサーバーが自動的に信頼されます。",
+    "description": "Tooltip of the forget-pairing action"
+  },
+  "pairRepairTitle": {
+    "message": "MCPサーバーが再ペアリングを求めています",
+    "description": "Notice title when the server offered a new pairing and the extension declined it"
+  },
+  "pairRepairBody": {
+    "message": "このポートのサーバーが新しいペアリングキーを提示しましたが、このブラウザは既に別のキーでペアリングされています。MCPサーバーを自分でリセットまたは再インストールした場合にのみ「再ペアリング」をクリックしてください。そうでない場合、別のプログラムがサーバーになりすましている可能性があります。",
+    "description": "Notice text for the re-pair offer; must name the Re-pair button (btnRepair)"
+  },
+  "btnRepair": {
+    "message": "再ペアリング",
+    "description": "Button that accepts the next pairing offer from the server"
+  },
+  "btnRepairing": {
+    "message": "サーバーを待機中…",
+    "description": "Re-pair button label while waiting for the server"
+  },
+  "repairTitle": {
+    "message": "サーバーからの次のペアリング提示を（2分間）受け入れ、今すぐ再接続します",
+    "description": "Tooltip of the Re-pair button"
+  },
+  "pairClosedTitle": {
+    "message": "MCPサーバーでペアリングが閉じられています",
+    "description": "Notice title when the server refuses new pairings (close code 4004)"
+  },
+  "pairClosedBody": {
+    "message": "サーバーは既に別のインストールとペアリングされています。サーバーを一度 --pair（または BROWSER_MCP_PAIR=1）付きで起動するか、サーバーの設定ディレクトリにある extension-keys.json を削除してください。",
+    "description": "Notice text for pairing-closed; keep --pair, BROWSER_MCP_PAIR=1 and extension-keys.json unchanged"
+  },
+  "pairKeysFileLabel": {
+    "message": "ペアリングファイル（サーバーの既定の設定ディレクトリ）:",
+    "description": "Label above the default path of the server pairing file"
+  },
+  "serverAuthFailedTitle": {
+    "message": "サーバーが正当性を証明できませんでした",
+    "description": "Notice title when the server failed the pairing challenge (close code 4101)"
+  },
+  "serverAuthFailedBody": {
+    "message": "このポートのプログラムはこのブラウザのペアリングキーを持っていないため、コマンドは実行されませんでした。サーバーのペアリングデータをリセットした場合は、サーバーの設定ディレクトリにある extension-keys.json を削除してサーバーを再起動し、求められたらここで「再ペアリング」をクリックしてください。そうでない場合、別のプログラムがこのポートで待ち受けている可能性があります。",
+    "description": "Notice text for server-auth-failed; keep extension-keys.json unchanged and name the Re-pair button"
+  },
+  "authFailedTitle": {
+    "message": "MCPサーバーがこのブラウザのペアリング証明を拒否しました",
+    "description": "Notice title when the server rejected the extension proof (close code 4005)"
+  },
+  "authFailedBody": {
+    "message": "サーバーはこのブラウザ用に別のペアリングキーを保持しています。サーバーの設定ディレクトリにある extension-keys.json を削除してサーバーを再起動し、求められたらここで「再ペアリング」をクリックしてください。",
+    "description": "Notice text for auth-failed; keep extension-keys.json unchanged and name the Re-pair button"
+  },
+  "protocolMismatchTitle": {
+    "message": "拡張機能とMCPサーバーのバージョンが一致しません",
+    "description": "Notice title when the bridge protocol versions differ"
+  },
+  "protocolUpdateServer": {
+    "message": "MCPサーバーがこの拡張機能より古いバージョンです。MCPサーバーを拡張機能と同じリリースに更新し、再起動してください。",
+    "description": "Protocol mismatch advice: the server is outdated"
+  },
+  "protocolUpdateExtension": {
+    "message": "この拡張機能がMCPサーバーより古いバージョンです。拡張機能をサーバーと同じリリースに更新し、再読み込みしてください。",
+    "description": "Protocol mismatch advice: the extension is outdated"
+  },
+  "protocolUpdateBoth": {
+    "message": "拡張機能とMCPサーバーのプロトコルバージョンが異なります。両方を同じリリースに更新してください。",
+    "description": "Protocol mismatch advice when the outdated side is unknown"
+  },
   "cat_tabs": {
     "message": "タブとウィンドウ",
     "description": "Category: Tabs & Windows"
@@ -226,5 +334,13 @@
   "cat_system": {
     "message": "システム",
     "description": "Category: System"
+  },
+  "cat_emulation": {
+    "message": "エミュレーション",
+    "description": "Category: Emulation"
+  },
+  "cat_performance": {
+    "message": "パフォーマンス",
+    "description": "Category: Performance"
   }
 }

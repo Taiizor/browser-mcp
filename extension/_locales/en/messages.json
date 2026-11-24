@@ -151,6 +151,114 @@
     "message": "The MCP server closed the connection",
     "description": "Notice title when the MCP server closed the connection with another code"
   },
+  "statusActionNeeded": {
+    "message": "Action needed",
+    "description": "Status badge when the user must decide whether to accept a new pairing offer"
+  },
+  "statusUntrustedServer": {
+    "message": "Unverified server",
+    "description": "Status badge when the program on the port could not prove it is the paired MCP server"
+  },
+  "statusUpdateNeeded": {
+    "message": "Update needed",
+    "description": "Status badge when the extension and MCP server protocol versions differ"
+  },
+  "pairInfoHandshake": {
+    "message": "Verifying the MCP server…",
+    "description": "Pairing status line while the server is being verified"
+  },
+  "pairInfoHasKey": {
+    "message": "This browser holds a pairing key",
+    "description": "Pairing status line when not connected but a pairing key is stored"
+  },
+  "pairInfoNoKey": {
+    "message": "Not paired yet",
+    "description": "Pairing status line when this browser has never been paired"
+  },
+  "pairInfoNoKeyTitle": {
+    "message": "The first MCP server that offers pairing is trusted automatically.",
+    "description": "Tooltip of the not-paired status line (trust on first use)"
+  },
+  "serverVersionLabel": {
+    "message": "Server",
+    "description": "Prefix before the MCP server version number (e.g. \"Server v0.3.5\")"
+  },
+  "btnForgetPairing": {
+    "message": "Forget pairing",
+    "description": "Small action that deletes the stored pairing key"
+  },
+  "btnForgetConfirm": {
+    "message": "Click again to forget",
+    "description": "Forget-pairing action after the first click: asks for a confirming second click"
+  },
+  "forgetPairingTitle": {
+    "message": "Delete this browser's pairing key and reconnect. The next MCP server that offers pairing will be trusted automatically.",
+    "description": "Tooltip of the forget-pairing action"
+  },
+  "pairRepairTitle": {
+    "message": "The MCP server asks to pair again",
+    "description": "Notice title when the server offered a new pairing and the extension declined it"
+  },
+  "pairRepairBody": {
+    "message": "A server on this port offered a new pairing key, but this browser is already paired with another key. Click Re-pair only if you reset or reinstalled the MCP server yourself; otherwise another program may be imitating it.",
+    "description": "Notice text for the re-pair offer; must name the Re-pair button (btnRepair)"
+  },
+  "btnRepair": {
+    "message": "Re-pair",
+    "description": "Button that accepts the next pairing offer from the server"
+  },
+  "btnRepairing": {
+    "message": "Waiting for the server…",
+    "description": "Re-pair button label while waiting for the server"
+  },
+  "repairTitle": {
+    "message": "Accept the server's next pairing offer (for 2 minutes) and reconnect now",
+    "description": "Tooltip of the Re-pair button"
+  },
+  "pairClosedTitle": {
+    "message": "Pairing is closed on the MCP server",
+    "description": "Notice title when the server refuses new pairings (close code 4004)"
+  },
+  "pairClosedBody": {
+    "message": "The server is already paired with another install. Start the server once with --pair (or BROWSER_MCP_PAIR=1), or delete extension-keys.json in the server config directory.",
+    "description": "Notice text for pairing-closed; keep --pair, BROWSER_MCP_PAIR=1 and extension-keys.json unchanged"
+  },
+  "pairKeysFileLabel": {
+    "message": "Pairing file (default server config directory):",
+    "description": "Label above the default path of the server pairing file"
+  },
+  "serverAuthFailedTitle": {
+    "message": "The server could not prove its identity",
+    "description": "Notice title when the server failed the pairing challenge (close code 4101)"
+  },
+  "serverAuthFailedBody": {
+    "message": "The program on this port does not hold this browser's pairing key, so no commands were run. If you reset the server's pairing data, delete extension-keys.json in the server config directory, restart the server and click Re-pair here when asked. Otherwise another program may be listening on this port.",
+    "description": "Notice text for server-auth-failed; keep extension-keys.json unchanged and name the Re-pair button"
+  },
+  "authFailedTitle": {
+    "message": "The MCP server rejected this browser's pairing proof",
+    "description": "Notice title when the server rejected the extension proof (close code 4005)"
+  },
+  "authFailedBody": {
+    "message": "The server holds a different pairing key for this browser. Delete extension-keys.json in the server config directory, restart the server and click Re-pair here when asked.",
+    "description": "Notice text for auth-failed; keep extension-keys.json unchanged and name the Re-pair button"
+  },
+  "protocolMismatchTitle": {
+    "message": "Extension and MCP server versions do not match",
+    "description": "Notice title when the bridge protocol versions differ"
+  },
+  "protocolUpdateServer": {
+    "message": "The MCP server is older than this extension. Update the MCP server to the same release as the extension, then restart it.",
+    "description": "Protocol mismatch advice: the server is outdated"
+  },
+  "protocolUpdateExtension": {
+    "message": "This extension is older than the MCP server. Update the extension to the same release as the server, then reload it.",
+    "description": "Protocol mismatch advice: the extension is outdated"
+  },
+  "protocolUpdateBoth": {
+    "message": "The extension and the MCP server use different protocol versions. Update both to the same release.",
+    "description": "Protocol mismatch advice when the outdated side is unknown"
+  },
   "cat_tabs": {
     "message": "Tabs & Windows",
     "description": "Category: Tabs & Windows"
@@ -226,5 +334,13 @@
   "cat_system": {
     "message": "System",
     "description": "Category: System"
+  },
+  "cat_emulation": {
+    "message": "Emulation",
+    "description": "Category: Emulation"
+  },
+  "cat_performance": {
+    "message": "Performance",
+    "description": "Category: Performance"
   }
 }

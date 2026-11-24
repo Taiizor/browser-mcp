@@ -24,7 +24,7 @@
     "description": "Status badge when error"
   },
   "statusConnecting": {
-    "message": "Verbindung wird hergestellt…",
+    "message": "Verbinden…",
     "description": "Status badge while connecting"
   },
   "statusRejected": {
@@ -151,6 +151,114 @@
     "message": "Der MCP-Server hat die Verbindung geschlossen",
     "description": "Notice title when the MCP server closed the connection with another code"
   },
+  "statusActionNeeded": {
+    "message": "Aktion erforderlich",
+    "description": "Status badge when the user must decide whether to accept a new pairing offer"
+  },
+  "statusUntrustedServer": {
+    "message": "Server ungeprüft",
+    "description": "Status badge when the program on the port could not prove it is the paired MCP server"
+  },
+  "statusUpdateNeeded": {
+    "message": "Update nötig",
+    "description": "Status badge when the extension and MCP server protocol versions differ"
+  },
+  "pairInfoHandshake": {
+    "message": "MCP-Server wird überprüft…",
+    "description": "Pairing status line while the server is being verified"
+  },
+  "pairInfoHasKey": {
+    "message": "Dieser Browser besitzt einen Kopplungsschlüssel",
+    "description": "Pairing status line when not connected but a pairing key is stored"
+  },
+  "pairInfoNoKey": {
+    "message": "Noch nicht gekoppelt",
+    "description": "Pairing status line when this browser has never been paired"
+  },
+  "pairInfoNoKeyTitle": {
+    "message": "Dem ersten MCP-Server, der eine Kopplung anbietet, wird automatisch vertraut.",
+    "description": "Tooltip of the not-paired status line (trust on first use)"
+  },
+  "serverVersionLabel": {
+    "message": "Server",
+    "description": "Prefix before the MCP server version number (e.g. \"Server v0.3.5\")"
+  },
+  "btnForgetPairing": {
+    "message": "Kopplung vergessen",
+    "description": "Small action that deletes the stored pairing key"
+  },
+  "btnForgetConfirm": {
+    "message": "Zum Vergessen erneut klicken",
+    "description": "Forget-pairing action after the first click: asks for a confirming second click"
+  },
+  "forgetPairingTitle": {
+    "message": "Löscht den Kopplungsschlüssel dieses Browsers und verbindet neu. Dem nächsten MCP-Server, der eine Kopplung anbietet, wird automatisch vertraut.",
+    "description": "Tooltip of the forget-pairing action"
+  },
+  "pairRepairTitle": {
+    "message": "Der MCP-Server möchte neu koppeln",
+    "description": "Notice title when the server offered a new pairing and the extension declined it"
+  },
+  "pairRepairBody": {
+    "message": "Ein Server an diesem Port hat einen neuen Kopplungsschlüssel angeboten, aber dieser Browser ist bereits mit einem anderen Schlüssel gekoppelt. Klicken Sie nur dann auf „Neu koppeln“, wenn Sie den MCP-Server selbst zurückgesetzt oder neu installiert haben; andernfalls gibt sich möglicherweise ein anderes Programm als dieser aus.",
+    "description": "Notice text for the re-pair offer; must name the Re-pair button (btnRepair)"
+  },
+  "btnRepair": {
+    "message": "Neu koppeln",
+    "description": "Button that accepts the next pairing offer from the server"
+  },
+  "btnRepairing": {
+    "message": "Warte auf den Server…",
+    "description": "Re-pair button label while waiting for the server"
+  },
+  "repairTitle": {
+    "message": "Das nächste Kopplungsangebot des Servers annehmen (2 Minuten lang) und sofort neu verbinden",
+    "description": "Tooltip of the Re-pair button"
+  },
+  "pairClosedTitle": {
+    "message": "Die Kopplung ist auf dem MCP-Server geschlossen",
+    "description": "Notice title when the server refuses new pairings (close code 4004)"
+  },
+  "pairClosedBody": {
+    "message": "Der Server ist bereits mit einer anderen Installation gekoppelt. Starten Sie den Server einmal mit --pair (oder BROWSER_MCP_PAIR=1), oder löschen Sie extension-keys.json im Konfigurationsverzeichnis des Servers.",
+    "description": "Notice text for pairing-closed; keep --pair, BROWSER_MCP_PAIR=1 and extension-keys.json unchanged"
+  },
+  "pairKeysFileLabel": {
+    "message": "Kopplungsdatei (Standard-Konfigurationsverzeichnis des Servers):",
+    "description": "Label above the default path of the server pairing file"
+  },
+  "serverAuthFailedTitle": {
+    "message": "Der Server konnte seine Identität nicht nachweisen",
+    "description": "Notice title when the server failed the pairing challenge (close code 4101)"
+  },
+  "serverAuthFailedBody": {
+    "message": "Das Programm an diesem Port besitzt den Kopplungsschlüssel dieses Browsers nicht, daher wurden keine Befehle ausgeführt. Wenn Sie die Kopplungsdaten des Servers zurückgesetzt haben, löschen Sie extension-keys.json im Konfigurationsverzeichnis des Servers, starten Sie den Server neu und klicken Sie hier auf „Neu koppeln“, sobald Sie dazu aufgefordert werden. Andernfalls lauscht möglicherweise ein anderes Programm an diesem Port.",
+    "description": "Notice text for server-auth-failed; keep extension-keys.json unchanged and name the Re-pair button"
+  },
+  "authFailedTitle": {
+    "message": "Der MCP-Server hat den Kopplungsnachweis dieses Browsers abgelehnt",
+    "description": "Notice title when the server rejected the extension proof (close code 4005)"
+  },
+  "authFailedBody": {
+    "message": "Der Server besitzt einen anderen Kopplungsschlüssel für diesen Browser. Löschen Sie extension-keys.json im Konfigurationsverzeichnis des Servers, starten Sie den Server neu und klicken Sie hier auf „Neu koppeln“, sobald Sie dazu aufgefordert werden.",
+    "description": "Notice text for auth-failed; keep extension-keys.json unchanged and name the Re-pair button"
+  },
+  "protocolMismatchTitle": {
+    "message": "Versionen von Erweiterung und MCP-Server passen nicht zusammen",
+    "description": "Notice title when the bridge protocol versions differ"
+  },
+  "protocolUpdateServer": {
+    "message": "Der MCP-Server ist älter als diese Erweiterung. Aktualisieren Sie den MCP-Server auf dieselbe Version wie die Erweiterung und starten Sie ihn neu.",
+    "description": "Protocol mismatch advice: the server is outdated"
+  },
+  "protocolUpdateExtension": {
+    "message": "Diese Erweiterung ist älter als der MCP-Server. Aktualisieren Sie die Erweiterung auf dieselbe Version wie den Server und laden Sie sie neu.",
+    "description": "Protocol mismatch advice: the extension is outdated"
+  },
+  "protocolUpdateBoth": {
+    "message": "Erweiterung und MCP-Server verwenden unterschiedliche Protokollversionen. Aktualisieren Sie beide auf dieselbe Version.",
+    "description": "Protocol mismatch advice when the outdated side is unknown"
+  },
   "cat_tabs": {
     "message": "Tabs & Fenster",
     "description": "Category: Tabs & Windows"
@@ -226,5 +334,13 @@
   "cat_system": {
     "message": "System",
     "description": "Category: System"
+  },
+  "cat_emulation": {
+    "message": "Emulation",
+    "description": "Category: Emulation"
+  },
+  "cat_performance": {
+    "message": "Leistung",
+    "description": "Category: Performance"
   }
 }

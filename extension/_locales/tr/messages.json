@@ -151,6 +151,114 @@
     "message": "MCP sunucusu bağlantıyı kapattı",
     "description": "Notice title when the MCP server closed the connection with another code"
   },
+  "statusActionNeeded": {
+    "message": "İşlem gerekli",
+    "description": "Status badge when the user must decide whether to accept a new pairing offer"
+  },
+  "statusUntrustedServer": {
+    "message": "Sunucu doğrulanmadı",
+    "description": "Status badge when the program on the port could not prove it is the paired MCP server"
+  },
+  "statusUpdateNeeded": {
+    "message": "Güncelleme gerekli",
+    "description": "Status badge when the extension and MCP server protocol versions differ"
+  },
+  "pairInfoHandshake": {
+    "message": "MCP sunucusu doğrulanıyor…",
+    "description": "Pairing status line while the server is being verified"
+  },
+  "pairInfoHasKey": {
+    "message": "Bu tarayıcıda bir eşleştirme anahtarı var",
+    "description": "Pairing status line when not connected but a pairing key is stored"
+  },
+  "pairInfoNoKey": {
+    "message": "Henüz eşleştirilmedi",
+    "description": "Pairing status line when this browser has never been paired"
+  },
+  "pairInfoNoKeyTitle": {
+    "message": "Eşleştirme öneren ilk MCP sunucusuna otomatik olarak güvenilir.",
+    "description": "Tooltip of the not-paired status line (trust on first use)"
+  },
+  "serverVersionLabel": {
+    "message": "Sunucu",
+    "description": "Prefix before the MCP server version number (e.g. \"Server v0.3.5\")"
+  },
+  "btnForgetPairing": {
+    "message": "Eşleştirmeyi unut",
+    "description": "Small action that deletes the stored pairing key"
+  },
+  "btnForgetConfirm": {
+    "message": "Unutmak için tekrar tıklayın",
+    "description": "Forget-pairing action after the first click: asks for a confirming second click"
+  },
+  "forgetPairingTitle": {
+    "message": "Bu tarayıcının eşleştirme anahtarını siler ve yeniden bağlanır. Eşleştirme öneren bir sonraki MCP sunucusuna otomatik olarak güvenilir.",
+    "description": "Tooltip of the forget-pairing action"
+  },
+  "pairRepairTitle": {
+    "message": "MCP sunucusu yeniden eşleştirme istiyor",
+    "description": "Notice title when the server offered a new pairing and the extension declined it"
+  },
+  "pairRepairBody": {
+    "message": "Bu porttaki bir sunucu yeni bir eşleştirme anahtarı önerdi, ancak bu tarayıcı zaten başka bir anahtarla eşleştirilmiş. Yeniden eşleştir düğmesine yalnızca MCP sunucusunu kendiniz sıfırladıysanız veya yeniden kurduysanız tıklayın; aksi halde başka bir program sunucunun kılığına giriyor olabilir.",
+    "description": "Notice text for the re-pair offer; must name the Re-pair button (btnRepair)"
+  },
+  "btnRepair": {
+    "message": "Yeniden eşleştir",
+    "description": "Button that accepts the next pairing offer from the server"
+  },
+  "btnRepairing": {
+    "message": "Sunucu bekleniyor…",
+    "description": "Re-pair button label while waiting for the server"
+  },
+  "repairTitle": {
+    "message": "Sunucunun bir sonraki eşleştirme önerisini (2 dakika boyunca) kabul et ve şimdi yeniden bağlan",
+    "description": "Tooltip of the Re-pair button"
+  },
+  "pairClosedTitle": {
+    "message": "MCP sunucusunda eşleştirme kapalı",
+    "description": "Notice title when the server refuses new pairings (close code 4004)"
+  },
+  "pairClosedBody": {
+    "message": "Sunucu zaten başka bir kurulumla eşleştirilmiş. Sunucuyu bir kez --pair (veya BROWSER_MCP_PAIR=1) ile başlatın ya da sunucunun yapılandırma dizinindeki extension-keys.json dosyasını silin.",
+    "description": "Notice text for pairing-closed; keep --pair, BROWSER_MCP_PAIR=1 and extension-keys.json unchanged"
+  },
+  "pairKeysFileLabel": {
+    "message": "Eşleştirme dosyası (sunucunun varsayılan yapılandırma dizini):",
+    "description": "Label above the default path of the server pairing file"
+  },
+  "serverAuthFailedTitle": {
+    "message": "Sunucu kimliğini kanıtlayamadı",
+    "description": "Notice title when the server failed the pairing challenge (close code 4101)"
+  },
+  "serverAuthFailedBody": {
+    "message": "Bu porttaki program bu tarayıcının eşleştirme anahtarına sahip değil, bu yüzden hiçbir komut çalıştırılmadı. Sunucunun eşleştirme verilerini siz sıfırladıysanız, sunucunun yapılandırma dizinindeki extension-keys.json dosyasını silin, sunucuyu yeniden başlatın ve istendiğinde burada Yeniden eşleştir düğmesine tıklayın. Aksi halde bu portu başka bir program dinliyor olabilir.",
+    "description": "Notice text for server-auth-failed; keep extension-keys.json unchanged and name the Re-pair button"
+  },
+  "authFailedTitle": {
+    "message": "MCP sunucusu bu tarayıcının eşleştirme kanıtını reddetti",
+    "description": "Notice title when the server rejected the extension proof (close code 4005)"
+  },
+  "authFailedBody": {
+    "message": "Sunucuda bu tarayıcı için farklı bir eşleştirme anahtarı var. Sunucunun yapılandırma dizinindeki extension-keys.json dosyasını silin, sunucuyu yeniden başlatın ve istendiğinde burada Yeniden eşleştir düğmesine tıklayın.",
+    "description": "Notice text for auth-failed; keep extension-keys.json unchanged and name the Re-pair button"
+  },
+  "protocolMismatchTitle": {
+    "message": "Eklenti ve MCP sunucusu sürümleri uyuşmuyor",
+    "description": "Notice title when the bridge protocol versions differ"
+  },
+  "protocolUpdateServer": {
+    "message": "MCP sunucusu bu eklentiden daha eski. MCP sunucusunu eklentiyle aynı sürüme güncelleyin ve yeniden başlatın.",
+    "description": "Protocol mismatch advice: the server is outdated"
+  },
+  "protocolUpdateExtension": {
+    "message": "Bu eklenti MCP sunucusundan daha eski. Eklentiyi sunucuyla aynı sürüme güncelleyin ve yeniden yükleyin.",
+    "description": "Protocol mismatch advice: the extension is outdated"
+  },
+  "protocolUpdateBoth": {
+    "message": "Eklenti ve MCP sunucusu farklı protokol sürümleri kullanıyor. İkisini de aynı sürüme güncelleyin.",
+    "description": "Protocol mismatch advice when the outdated side is unknown"
+  },
   "cat_tabs": {
     "message": "Sekmeler ve Pencereler",
     "description": "Category: Tabs & Windows"
@@ -226,5 +334,13 @@
   "cat_system": {
     "message": "Sistem",
     "description": "Category: System"
+  },
+  "cat_emulation": {
+    "message": "Emülasyon",
+    "description": "Category: Emulation"
+  },
+  "cat_performance": {
+    "message": "Performans",
+    "description": "Category: Performance"
   }
 }

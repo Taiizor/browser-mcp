@@ -151,6 +151,114 @@
     "message": "O servidor MCP encerrou a conexão",
     "description": "Notice title when the MCP server closed the connection with another code"
   },
+  "statusActionNeeded": {
+    "message": "Ação necessária",
+    "description": "Status badge when the user must decide whether to accept a new pairing offer"
+  },
+  "statusUntrustedServer": {
+    "message": "Não verificado",
+    "description": "Status badge when the program on the port could not prove it is the paired MCP server"
+  },
+  "statusUpdateNeeded": {
+    "message": "Desatualizado",
+    "description": "Status badge when the extension and MCP server protocol versions differ"
+  },
+  "pairInfoHandshake": {
+    "message": "Verificando o servidor MCP…",
+    "description": "Pairing status line while the server is being verified"
+  },
+  "pairInfoHasKey": {
+    "message": "Este navegador tem uma chave de pareamento",
+    "description": "Pairing status line when not connected but a pairing key is stored"
+  },
+  "pairInfoNoKey": {
+    "message": "Ainda não pareado",
+    "description": "Pairing status line when this browser has never been paired"
+  },
+  "pairInfoNoKeyTitle": {
+    "message": "O primeiro servidor MCP que oferecer pareamento é considerado confiável automaticamente.",
+    "description": "Tooltip of the not-paired status line (trust on first use)"
+  },
+  "serverVersionLabel": {
+    "message": "Servidor",
+    "description": "Prefix before the MCP server version number (e.g. \"Server v0.3.5\")"
+  },
+  "btnForgetPairing": {
+    "message": "Esquecer pareamento",
+    "description": "Small action that deletes the stored pairing key"
+  },
+  "btnForgetConfirm": {
+    "message": "Clique de novo para esquecer",
+    "description": "Forget-pairing action after the first click: asks for a confirming second click"
+  },
+  "forgetPairingTitle": {
+    "message": "Exclui a chave de pareamento deste navegador e reconecta. O próximo servidor MCP que oferecer pareamento será considerado confiável automaticamente.",
+    "description": "Tooltip of the forget-pairing action"
+  },
+  "pairRepairTitle": {
+    "message": "O servidor MCP pede um novo pareamento",
+    "description": "Notice title when the server offered a new pairing and the extension declined it"
+  },
+  "pairRepairBody": {
+    "message": "Um servidor nesta porta ofereceu uma nova chave de pareamento, mas este navegador já está pareado com outra chave. Clique em Parear novamente somente se você mesmo redefiniu ou reinstalou o servidor MCP; caso contrário, outro programa pode estar se passando por ele.",
+    "description": "Notice text for the re-pair offer; must name the Re-pair button (btnRepair)"
+  },
+  "btnRepair": {
+    "message": "Parear novamente",
+    "description": "Button that accepts the next pairing offer from the server"
+  },
+  "btnRepairing": {
+    "message": "Aguardando o servidor…",
+    "description": "Re-pair button label while waiting for the server"
+  },
+  "repairTitle": {
+    "message": "Aceitar a próxima oferta de pareamento do servidor (por 2 minutos) e reconectar agora",
+    "description": "Tooltip of the Re-pair button"
+  },
+  "pairClosedTitle": {
+    "message": "O pareamento está fechado no servidor MCP",
+    "description": "Notice title when the server refuses new pairings (close code 4004)"
+  },
+  "pairClosedBody": {
+    "message": "O servidor já está pareado com outra instalação. Inicie o servidor uma vez com --pair (ou BROWSER_MCP_PAIR=1), ou exclua extension-keys.json do diretório de configuração do servidor.",
+    "description": "Notice text for pairing-closed; keep --pair, BROWSER_MCP_PAIR=1 and extension-keys.json unchanged"
+  },
+  "pairKeysFileLabel": {
+    "message": "Arquivo de pareamento (diretório de configuração padrão do servidor):",
+    "description": "Label above the default path of the server pairing file"
+  },
+  "serverAuthFailedTitle": {
+    "message": "O servidor não conseguiu provar sua identidade",
+    "description": "Notice title when the server failed the pairing challenge (close code 4101)"
+  },
+  "serverAuthFailedBody": {
+    "message": "O programa nesta porta não tem a chave de pareamento deste navegador, então nenhum comando foi executado. Se você redefiniu os dados de pareamento do servidor, exclua extension-keys.json do diretório de configuração do servidor, reinicie o servidor e clique aqui em Parear novamente quando solicitado. Caso contrário, outro programa pode estar escutando nesta porta.",
+    "description": "Notice text for server-auth-failed; keep extension-keys.json unchanged and name the Re-pair button"
+  },
+  "authFailedTitle": {
+    "message": "O servidor MCP rejeitou a prova de pareamento deste navegador",
+    "description": "Notice title when the server rejected the extension proof (close code 4005)"
+  },
+  "authFailedBody": {
+    "message": "O servidor tem outra chave de pareamento para este navegador. Exclua extension-keys.json do diretório de configuração do servidor, reinicie o servidor e clique aqui em Parear novamente quando solicitado.",
+    "description": "Notice text for auth-failed; keep extension-keys.json unchanged and name the Re-pair button"
+  },
+  "protocolMismatchTitle": {
+    "message": "As versões da extensão e do servidor MCP não correspondem",
+    "description": "Notice title when the bridge protocol versions differ"
+  },
+  "protocolUpdateServer": {
+    "message": "O servidor MCP é mais antigo que esta extensão. Atualize o servidor MCP para a mesma versão da extensão e reinicie-o.",
+    "description": "Protocol mismatch advice: the server is outdated"
+  },
+  "protocolUpdateExtension": {
+    "message": "Esta extensão é mais antiga que o servidor MCP. Atualize a extensão para a mesma versão do servidor e recarregue-a.",
+    "description": "Protocol mismatch advice: the extension is outdated"
+  },
+  "protocolUpdateBoth": {
+    "message": "A extensão e o servidor MCP usam versões de protocolo diferentes. Atualize ambos para a mesma versão.",
+    "description": "Protocol mismatch advice when the outdated side is unknown"
+  },
   "cat_tabs": {
     "message": "Abas e janelas",
     "description": "Category: Tabs & Windows"
@@ -226,5 +334,13 @@
   "cat_system": {
     "message": "Sistema",
     "description": "Category: System"
+  },
+  "cat_emulation": {
+    "message": "Emulação",
+    "description": "Category: Emulation"
+  },
+  "cat_performance": {
+    "message": "Desempenho",
+    "description": "Category: Performance"
   }
 }

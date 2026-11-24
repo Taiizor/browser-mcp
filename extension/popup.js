@@ -58,39 +58,258 @@ function updateVer(port) {
   ver.title = id ? `${t("extensionIdLabel", "Extension ID")}: ${id}` : "";
 }
 
-// Shows why the MCP server closed the connection (application close codes 4000-4999).
-// 4003 = the server does not trust this extension id; anything else is shown generically.
-function updateCloseNotice(r) {
+// Bridge pairing states reported by the background (mcp-status.pairState, protocol v3).
+const PAIR_STATES = new Set(["none", "handshake", "paired", "repair-offered", "pairing-closed", "server-auth-failed", "auth-failed", "protocol-mismatch"]);
+// States that need the user's attention; each one is explained in the notice box.
+const PAIR_PROBLEMS = new Set(["repair-offered", "pairing-closed", "server-auth-failed", "auth-failed", "protocol-mismatch"]);
+// States whose remedy involves the server's extension-keys.json.
+const KEYS_FILE_STATES = new Set(["pairing-closed", "server-auth-failed", "auth-failed"]);
+// The background keeps a Re-pair armed for 2 minutes; the button only shows a short
+// waiting label so a failed attempt can be retried without reopening the popup.
+const REPAIR_FEEDBACK_MS = 8000;
+// "Forget pairing" needs a second click within this window (confirm() is unreliable in popups).
+const FORGET_CONFIRM_MS = 4000;
+let repairPendingUntil = 0;
+let forgetArmedUntil = 0;
+let forgetTimer = null;
+
+// Writes only on change: the status poll runs every 2 s and the notice is role="alert",
+// so rewriting identical text would make screen readers announce it again.
+function setText(node, text) {
+  if (node && node.textContent !== text) node.textContent = text;
+}
+
+function lastCloseOf(r) {
+  const lc = r && r.lastClose && typeof r.lastClose === "object" ? r.lastClose : null;
+  if (!lc) return null;
+  return {
+    code: Number(lc.code) || 0,
+    reason: typeof lc.reason === "string" ? lc.reason.slice(0, 200) : "",
+  };
+}
+
+// Problem states win even while a retry socket is open, so the explanation stays put.
+// "paired"/"handshake" need an open socket; a background without pairState (older
+// build) is mapped from its `paired` flag.
+function pairStateOf(r) {
+  const s = r && typeof r.pairState === "string" && PAIR_STATES.has(r.pairState) ? r.pairState : "";
+  if (PAIR_PROBLEMS.has(s)) return s;
+  if (!r || !r.bridgeConnected) return "none";
+  if (s === "paired" || s === "handshake") return s;
+  return r.paired === true ? "paired" : "handshake";
+}
+
+// serverVersion comes from the peer: rendered via textContent only, and anything
+// that does not look like a version string is not shown at all.
+function serverVersionOf(r) {
+  const v = r && typeof r.serverVersion === "string" ? r.serverVersion.trim().replace(/^v/i, "") : "";
+  return /^[0-9A-Za-z.+-]{1,32}$/.test(v) ? v : "";
+}
+
+// Which side to update. The server's 4002 reason carries both protocol numbers
+// ("protocol-mismatch:server=3,ext=2"); 4102 "server-outdated" is the extension
+// refusing a server that answered without the v3 handshake.
+function protocolAdvice(lc) {
+  if (lc && (lc.code === 4102 || /server-outdated/.test(lc.reason))) return "server";
+  const m = lc ? /server=(\d+)\D+ext=(\d+)/.exec(lc.reason) : null;
+  if (m) {
+    const srv = Number(m[1]);
+    const ext = Number(m[2]);
+    if (srv > ext) return "extension";
+    if (srv < ext) return "server";
+  }
+  return "both";
+}
+
+function setRepairLabel() {
+  const b = $("#repairBtn");
+  if (!b) return;
+  const pending = Date.now() < repairPendingUntil;
+  b.disabled = pending;
+  setText(b, pending ? t("btnRepairing", "Waiting for the server…") : t("btnRepair", "Re-pair"));
+}
+
+function setForgetLabel() {
+  const b = $("#forgetPair");
+  if (!b) return;
+  const armed = Date.now() < forgetArmedUntil;
+  b.classList.toggle("armed", armed);
+  setText(b, armed ? t("btnForgetConfirm", "Click again to forget") : t("btnForgetPairing", "Forget pairing"));
+}
+
+function setPill(tone, label, title = "") {
+  const pill = $("#pill");
+  if (pill) {
+    pill.className = "badge " + tone;
+    // The label may be cut with an ellipsis in long locales; the tooltip keeps it readable.
+    pill.title = title || label;
+  }
+  setText($("#pillTx"), label);
+}
+
+function updatePill(r, state) {
+  const lc = lastCloseOf(r);
+  const code = lc ? lc.code : 0;
+  const ver = serverVersionOf(r);
+  switch (state) {
+    case "paired":
+      setPill(
+        "on",
+        t("statusConnected", "Connected"),
+        t("statusPairedTitle", "Paired with the MCP server") + (ver ? ` · ${t("serverVersionLabel", "Server")} v${ver}` : ""),
+      );
+      return;
+    case "handshake":
+      setPill("wait", t("statusConnecting", "Connecting…"), t("statusHandshakeTitle", "Connected, waiting for the MCP server handshake"));
+      return;
+    case "repair-offered":
+      setPill("wait", t("statusActionNeeded", "Action needed"));
+      return;
+    case "server-auth-failed":
+      setPill("off", t("statusUntrustedServer", "Unverified server"));
+      return;
+    case "protocol-mismatch":
+      setPill("off", t("statusUpdateNeeded", "Update needed"));
+      return;
+    case "pairing-closed":
+    case "auth-failed":
+      setPill("off", t("statusRejected", "Rejected"));
+      return;
+    default:
+      if (code >= 4000 && code <= 4999) setPill("off", t("statusRejected", "Rejected"));
+      else setPill("off", t("statusNoServer", "No server"));
+  }
+}
+
+// One-line pairing status under the header; also hosts "Forget pairing".
+function updatePairBar(r, state) {
+  const bar = $("#pairBar");
+  if (!bar) return;
+  const live = state === "paired" || state === "handshake";
+  // Without hasKey (older background) only the live states can be described.
+  if (!live && !PAIR_PROBLEMS.has(state) && !(r && typeof r.hasKey === "boolean")) {
+    bar.hidden = true;
+    return;
+  }
+  const hasKey = !!(r && r.hasKey === true);
+  let tone = "";
+  let label;
+  let tip = "";
+  if (state === "paired") {
+    tone = "ok";
+    label = t("statusPairedTitle", "Paired with the MCP server");
+  } else if (state === "handshake") {
+    tone = "wait";
+    label = t("pairInfoHandshake", "Verifying the MCP server…");
+  } else if (hasKey) {
+    label = t("pairInfoHasKey", "This browser holds a pairing key");
+  } else {
+    label = t("pairInfoNoKey", "Not paired yet");
+    tip = t("pairInfoNoKeyTitle", "The first MCP server that offers pairing is trusted automatically.");
+  }
+  if (state === "repair-offered") tone = "wait";
+  else if (PAIR_PROBLEMS.has(state)) tone = "bad";
+  bar.className = "pair-bar" + (tone ? " " + tone : "");
+  const text = $("#pairText");
+  setText(text, label);
+  if (text) text.title = tip || label;
+  const verEl = $("#pairVer");
+  const ver = serverVersionOf(r);
+  if (verEl) {
+    verEl.hidden = !(state === "paired" && ver);
+    setText(verEl, ver ? `${t("serverVersionLabel", "Server")} v${ver}` : "");
+  }
+  const forget = $("#forgetPair");
+  if (forget) {
+    if (!hasKey) forgetArmedUntil = 0;
+    forget.hidden = !hasKey;
+    setForgetLabel();
+  }
+  bar.hidden = false;
+}
+
+// Explains pairing problems (pairState) and other application close codes
+// (4000-4999) the MCP server sent. 4003 = the server does not trust this extension id.
+function updateNotice(r, state) {
   const box = $("#trustBox");
   if (!box) return;
-  const lc = r && !r.bridgeConnected && r.lastClose && typeof r.lastClose === "object" ? r.lastClose : null;
-  const code = lc ? Number(lc.code) : 0;
-  if (!lc || !(code >= 4000 && code <= 4999)) {
+  const lc = lastCloseOf(r);
+  const code = lc ? lc.code : 0;
+  const connected = !!(r && r.bridgeConnected);
+  let kind = "";
+  if (PAIR_PROBLEMS.has(state)) kind = state;
+  else if (!connected && code === 4003) kind = "untrusted";
+  else if (!connected && code >= 4000 && code <= 4999) kind = "closed";
+  if (!kind) {
     box.hidden = true;
     return;
   }
-  const untrusted = code === 4003;
-  const id = extensionId();
-  const title = $("#noticeTitle");
-  if (title) {
-    title.textContent = untrusted
-      ? t("trustRejectedTitle", "The MCP server rejected this extension")
-      : t("serverClosedTitle", "The MCP server closed the connection");
+  let title;
+  let body = "";
+  switch (kind) {
+    case "repair-offered":
+      title = t("pairRepairTitle", "The MCP server asks to pair again");
+      body = t("pairRepairBody", "A server on this port offered a new pairing key, but this browser is already paired with another key. Click Re-pair only if you reset or reinstalled the MCP server yourself; otherwise another program may be imitating it.");
+      break;
+    case "pairing-closed":
+      title = t("pairClosedTitle", "Pairing is closed on the MCP server");
+      body = t("pairClosedBody", "The server is already paired with another install. Start the server once with --pair (or BROWSER_MCP_PAIR=1), or delete extension-keys.json in the server config directory.");
+      break;
+    case "server-auth-failed":
+      title = t("serverAuthFailedTitle", "The server could not prove its identity");
+      body = t("serverAuthFailedBody", "The program on this port does not hold this browser's pairing key, so no commands were run. If you reset the server's pairing data, delete extension-keys.json in the server config directory, restart the server and click Re-pair here when asked. Otherwise another program may be listening on this port.");
+      break;
+    case "auth-failed":
+      title = t("authFailedTitle", "The MCP server rejected this browser's pairing proof");
+      body = t("authFailedBody", "The server holds a different pairing key for this browser. Delete extension-keys.json in the server config directory, restart the server and click Re-pair here when asked.");
+      break;
+    case "protocol-mismatch": {
+      title = t("protocolMismatchTitle", "Extension and MCP server versions do not match");
+      const side = protocolAdvice(lc);
+      body =
+        side === "server"
+          ? t("protocolUpdateServer", "The MCP server is older than this extension. Update the MCP server to the same release as the extension, then restart it.")
+          : side === "extension"
+            ? t("protocolUpdateExtension", "This extension is older than the MCP server. Update the extension to the same release as the server, then reload it.")
+            : t("protocolUpdateBoth", "The extension and the MCP server use different protocol versions. Update both to the same release.");
+      break;
+    }
+    case "untrusted":
+      title = t("trustRejectedTitle", "The MCP server rejected this extension");
+      break;
+    default:
+      title = t("serverClosedTitle", "The MCP server closed the connection");
   }
+  box.classList.toggle("warn", kind === "repair-offered");
+  setText($("#noticeTitle"), title);
+  const bodyEl = $("#noticeBody");
+  if (bodyEl) {
+    setText(bodyEl, body);
+    bodyEl.hidden = !body;
+  }
+  const keys = $("#noticeKeys");
+  if (keys) keys.hidden = !KEYS_FILE_STATES.has(kind);
+
+  const untrusted = kind === "untrusted";
+  const id = extensionId();
   const help = $("#trustHelp");
   if (help) help.hidden = !untrusted;
   const idRow = $("#trustIdRow");
   if (idRow) idRow.hidden = !untrusted || !id;
-  const env = $("#trustEnv");
-  if (env) env.textContent = `BROWSER_MCP_EXTENSION_IDS=${id}`;
-  const idEl = $("#extId");
-  if (idEl) idEl.textContent = id;
+  setText($("#trustEnv"), `BROWSER_MCP_EXTENSION_IDS=${id}`);
+  setText($("#extId"), id);
+
+  // Raw close code/reason for diagnosis; the decline that leads to the Re-pair offer
+  // (4100 pair-declined) is expected and would only confuse.
   const info = $("#closeInfo");
   if (info) {
-    const reason = typeof lc.reason === "string" ? lc.reason.slice(0, 200) : "";
-    info.textContent = reason ? `${code} ${reason}` : String(code);
-    info.hidden = untrusted;
+    const showInfo = !!lc && code >= 4000 && code <= 4999 && !untrusted && kind !== "repair-offered";
+    setText(info, showInfo ? (lc.reason ? `${code} ${lc.reason}` : String(code)) : "");
+    info.hidden = !showInfo;
   }
+  const actions = $("#noticeActions");
+  if (actions) actions.hidden = kind !== "repair-offered";
+  setRepairLabel();
   box.hidden = false;
 }
 
@@ -115,13 +334,6 @@ async function copyText(text) {
 }
 
 async function refreshStatus() {
-  const pill = $("#pill");
-  const tx = $("#pillTx");
-  const set = (on, label, title = "") => {
-    pill.className = "badge " + (on ? "on" : "off");
-    tx.textContent = label;
-    pill.title = title;
-  };
   try {
     const r = await bg({ type: "mcp-status" });
     if (r && typeof r.extensionId === "string" && r.extensionId) lastExtensionId = r.extensionId;
@@ -142,25 +354,51 @@ async function refreshStatus() {
     } else if (activeBar) {
       activeBar.style.display = "none";
     }
-    updateCloseNotice(r);
-    const closeCode = r && r.lastClose && typeof r.lastClose === "object" ? Number(r.lastClose.code) : 0;
-    if (r && r.bridgeConnected) {
-      // `paired` = the server answered our hello with a welcome (protocol 2).
-      const title =
-        r.paired === true
-          ? t("statusPairedTitle", "Paired with the MCP server")
-          : r.paired === false
-            ? t("statusHandshakeTitle", "Connected, waiting for the MCP server handshake")
-            : "";
-      set(true, t("statusConnected", "Connected"), title);
-    } else if (closeCode >= 4000 && closeCode <= 4999) {
-      set(false, t("statusRejected", "Rejected"));
-    } else {
-      set(false, t("statusNoServer", "No server"));
-    }
+    const state = pairStateOf(r);
+    updatePill(r, state);
+    updatePairBar(r, state);
+    updateNotice(r, state);
   } catch {
-    set(false, t("statusError", "Error"));
+    setPill("off", t("statusError", "Error"));
   }
+}
+
+// Arms the background to accept the server's next pairing offer (2 minutes) and
+// reconnect at once; the status poll then shows the outcome.
+async function requestRepair() {
+  if (Date.now() < repairPendingUntil) return;
+  repairPendingUntil = Date.now() + REPAIR_FEEDBACK_MS;
+  setRepairLabel();
+  try {
+    const res = await bg({ type: "mcp-repair" });
+    if (!res || res.ok !== true) repairPendingUntil = 0;
+  } catch {
+    repairPendingUntil = 0;
+  }
+  setRepairLabel();
+  setTimeout(() => {
+    setRepairLabel();
+    refreshStatus();
+  }, REPAIR_FEEDBACK_MS + 50);
+  await refreshStatus();
+}
+
+// First click arms, second click (within FORGET_CONFIRM_MS) deletes the stored key.
+async function forgetPairing() {
+  if (forgetTimer) clearTimeout(forgetTimer);
+  forgetTimer = null;
+  if (Date.now() >= forgetArmedUntil) {
+    forgetArmedUntil = Date.now() + FORGET_CONFIRM_MS;
+    setForgetLabel();
+    forgetTimer = setTimeout(setForgetLabel, FORGET_CONFIRM_MS + 50);
+    return;
+  }
+  forgetArmedUntil = 0;
+  setForgetLabel();
+  try {
+    await bg({ type: "mcp-forget-pairing" });
+  } catch {}
+  await refreshStatus();
 }
 
 // Apply permission changes ({action: enabled}) and send ONLY the actions whose
@@ -367,6 +605,11 @@ function switchTab(name) {
       }, 1500);
     });
   }
+
+  const repairBtn = $("#repairBtn");
+  if (repairBtn) repairBtn.addEventListener("click", requestRepair);
+  const forgetBtn = $("#forgetPair");
+  if (forgetBtn) forgetBtn.addEventListener("click", forgetPairing);
 
   const btnNavPerms = $("#navPerms");
   const btnNavHist = $("#navHistory");

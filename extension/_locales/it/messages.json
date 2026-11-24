@@ -24,7 +24,7 @@
     "description": "Status badge when error"
   },
   "statusConnecting": {
-    "message": "Connessione in corso…",
+    "message": "Connessione…",
     "description": "Status badge while connecting"
   },
   "statusRejected": {
@@ -151,6 +151,114 @@
     "message": "Il server MCP ha chiuso la connessione",
     "description": "Notice title when the MCP server closed the connection with another code"
   },
+  "statusActionNeeded": {
+    "message": "Azione richiesta",
+    "description": "Status badge when the user must decide whether to accept a new pairing offer"
+  },
+  "statusUntrustedServer": {
+    "message": "Non verificato",
+    "description": "Status badge when the program on the port could not prove it is the paired MCP server"
+  },
+  "statusUpdateNeeded": {
+    "message": "Da aggiornare",
+    "description": "Status badge when the extension and MCP server protocol versions differ"
+  },
+  "pairInfoHandshake": {
+    "message": "Verifica del server MCP…",
+    "description": "Pairing status line while the server is being verified"
+  },
+  "pairInfoHasKey": {
+    "message": "Questo browser ha una chiave di associazione",
+    "description": "Pairing status line when not connected but a pairing key is stored"
+  },
+  "pairInfoNoKey": {
+    "message": "Non ancora associato",
+    "description": "Pairing status line when this browser has never been paired"
+  },
+  "pairInfoNoKeyTitle": {
+    "message": "Il primo server MCP che offre l'associazione viene considerato attendibile automaticamente.",
+    "description": "Tooltip of the not-paired status line (trust on first use)"
+  },
+  "serverVersionLabel": {
+    "message": "Server",
+    "description": "Prefix before the MCP server version number (e.g. \"Server v0.3.5\")"
+  },
+  "btnForgetPairing": {
+    "message": "Dimentica associazione",
+    "description": "Small action that deletes the stored pairing key"
+  },
+  "btnForgetConfirm": {
+    "message": "Fai clic di nuovo per dimenticare",
+    "description": "Forget-pairing action after the first click: asks for a confirming second click"
+  },
+  "forgetPairingTitle": {
+    "message": "Elimina la chiave di associazione di questo browser e si riconnette. Il prossimo server MCP che offre l'associazione verrà considerato attendibile automaticamente.",
+    "description": "Tooltip of the forget-pairing action"
+  },
+  "pairRepairTitle": {
+    "message": "Il server MCP chiede una nuova associazione",
+    "description": "Notice title when the server offered a new pairing and the extension declined it"
+  },
+  "pairRepairBody": {
+    "message": "Un server su questa porta ha offerto una nuova chiave di associazione, ma questo browser è già associato con un'altra chiave. Fai clic su Riassocia solo se hai reimpostato o reinstallato tu stesso il server MCP; altrimenti un altro programma potrebbe spacciarsi per esso.",
+    "description": "Notice text for the re-pair offer; must name the Re-pair button (btnRepair)"
+  },
+  "btnRepair": {
+    "message": "Riassocia",
+    "description": "Button that accepts the next pairing offer from the server"
+  },
+  "btnRepairing": {
+    "message": "In attesa del server…",
+    "description": "Re-pair button label while waiting for the server"
+  },
+  "repairTitle": {
+    "message": "Accetta la prossima offerta di associazione del server (per 2 minuti) e riconnettiti ora",
+    "description": "Tooltip of the Re-pair button"
+  },
+  "pairClosedTitle": {
+    "message": "L'associazione è chiusa sul server MCP",
+    "description": "Notice title when the server refuses new pairings (close code 4004)"
+  },
+  "pairClosedBody": {
+    "message": "Il server è già associato a un'altra installazione. Avvia il server una volta con --pair (o BROWSER_MCP_PAIR=1), oppure elimina extension-keys.json nella directory di configurazione del server.",
+    "description": "Notice text for pairing-closed; keep --pair, BROWSER_MCP_PAIR=1 and extension-keys.json unchanged"
+  },
+  "pairKeysFileLabel": {
+    "message": "File di associazione (directory di configurazione predefinita del server):",
+    "description": "Label above the default path of the server pairing file"
+  },
+  "serverAuthFailedTitle": {
+    "message": "Il server non ha potuto dimostrare la propria identità",
+    "description": "Notice title when the server failed the pairing challenge (close code 4101)"
+  },
+  "serverAuthFailedBody": {
+    "message": "Il programma su questa porta non possiede la chiave di associazione di questo browser, quindi non è stato eseguito alcun comando. Se hai reimpostato i dati di associazione del server, elimina extension-keys.json nella directory di configurazione del server, riavvia il server e fai clic qui su Riassocia quando richiesto. Altrimenti un altro programma potrebbe essere in ascolto su questa porta.",
+    "description": "Notice text for server-auth-failed; keep extension-keys.json unchanged and name the Re-pair button"
+  },
+  "authFailedTitle": {
+    "message": "Il server MCP ha rifiutato la prova di associazione di questo browser",
+    "description": "Notice title when the server rejected the extension proof (close code 4005)"
+  },
+  "authFailedBody": {
+    "message": "Il server ha un'altra chiave di associazione per questo browser. Elimina extension-keys.json nella directory di configurazione del server, riavvia il server e fai clic qui su Riassocia quando richiesto.",
+    "description": "Notice text for auth-failed; keep extension-keys.json unchanged and name the Re-pair button"
+  },
+  "protocolMismatchTitle": {
+    "message": "Le versioni dell'estensione e del server MCP non corrispondono",
+    "description": "Notice title when the bridge protocol versions differ"
+  },
+  "protocolUpdateServer": {
+    "message": "Il server MCP è più vecchio di questa estensione. Aggiorna il server MCP alla stessa versione dell'estensione, quindi riavvialo.",
+    "description": "Protocol mismatch advice: the server is outdated"
+  },
+  "protocolUpdateExtension": {
+    "message": "Questa estensione è più vecchia del server MCP. Aggiorna l'estensione alla stessa versione del server, quindi ricaricala.",
+    "description": "Protocol mismatch advice: the extension is outdated"
+  },
+  "protocolUpdateBoth": {
+    "message": "L'estensione e il server MCP usano versioni di protocollo diverse. Aggiorna entrambi alla stessa versione.",
+    "description": "Protocol mismatch advice when the outdated side is unknown"
+  },
   "cat_tabs": {
     "message": "Schede e finestre",
     "description": "Category: Tabs & Windows"
@@ -226,5 +334,13 @@
   "cat_system": {
     "message": "Sistema",
     "description": "Category: System"
+  },
+  "cat_emulation": {
+    "message": "Emulazione",
+    "description": "Category: Emulation"
+  },
+  "cat_performance": {
+    "message": "Prestazioni",
+    "description": "Category: Performance"
   }
 }
