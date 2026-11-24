@@ -4,28 +4,66 @@ import os from "node:os";
 import path from "node:path";
 import type { IncomingMessage } from "node:http";
 import { WebSocketServer, WebSocket } from "ws";
+import pkg from "../package.json" with { type: "json" };
 
-// WS bridge protocol v2 (see SECURITY.md for the trust model).
+// WS bridge protocol v3 (see SECURITY.md for the trust model).
 //
 // Handshake:
 //   - Web pages (any non-extension Origin) are refused during the HTTP upgrade
 //     (403), so they cannot even detect the bridge.
 //   - Extension sockets (chrome-extension:// / moz-extension:// Origin) must
 //     come from a trusted extension id (built-in store id, BROWSER_MCP_EXTENSION_IDS,
-//     --extension-id, or ~/.browser-mcp/trusted-extensions.json; trust-on-first-use
+//     --extension-id, or <configDir>/trusted-extensions.json; trust-on-first-use
 //     while that file is empty). Untrusted ids are closed with 4003.
-//   - Origin-less sockets (satellites, CLI scripts) must authenticate first with
-//     { type: "auth", token } (token file ~/.browser-mcp/bridge-<port>.token),
+//   - Any local process can send any Origin header, so the id is only a filter.
+//     Each extension install then proves a per-install key K, and the extension
+//     checks that the server knows K before it runs anything (mutual HMAC). K is
+//     handed out once, while the pairing window is open: no install paired yet,
+//     or the server runs with --pair / BROWSER_MCP_PAIR=1 (10 min, one install).
+//     Keys live in <configDir>/extension-keys.json (0600).
+//   - Origin-less sockets (satellites, CLI scripts) must authenticate first with the
+//     per-run token of <configDir>/bridge-<port>.token (mutual HMAC, see below),
 //     otherwise they are closed with 4001.
 //
-// Messages:
-//   EXT  -> MCP: { type: "hello", role: "extension", browser, extensionId, version, protocol, perms: { disabled } }
-//   MCP  -> EXT: { type: "welcome", protocol: 2, pid }
+// Extension handshake (Ne / Ns = 32 random bytes as lowercase hex, HMAC = HMAC-SHA256
+// keyed with the hex-decoded K, hex output, extId = the id from the Origin, port = the TCP
+// port as a decimal string: the one this server is bound to, and the one the extension dialed,
+// so a challenge relayed from a primary on another port never verifies):
+//   EXT -> MCP: { type: "hello", role: "extension", protocol: 3, browser, extensionId, version,
+//                 perms: { disabled }, installId, nonce: Ne, hasKey }
+//   install has a stored key (and hasKey is not false):
+//     MCP -> EXT: { type: "challenge", nonce: Ns, proof: HMAC("browser-mcp/v3|server|<extId>|<installId>|<port>|<Ne>|<Ns>") }
+//     EXT -> MCP: { type: "auth", proof: HMAC("browser-mcp/v3|extension|<extId>|<installId>|<port>|<Ns>|<Ne>") }
+//   no stored key, pairing window open (K is fresh and only saved once the proof checks out):
+//     MCP -> EXT: { type: "pair", nonce: Ns, key: K }
+//     EXT -> MCP: { type: "pair_accept", proof: <extension proof, computed with K> }
+//   MCP -> EXT: { type: "welcome", protocol: 3, pid, serverVersion }   (extension is now authenticated)
+//   Close codes: 4001 auth-required (clients), 4002 protocol-mismatch:server=3,ext=<n>,
+//   4003 untrusted-extension:<id>, 4004 pairing-closed, 4005 auth-failed, 4006 replaced
+//   (same install connected again), 4008 handshake-timeout; sent by the extension:
+//   4100 pair-declined, 4101 server-auth-failed, 4102 server-outdated (only 4100 / 4101 sent in
+//   answer to this server's own pair offer / challenge are recorded; 4102 answers a welcome
+//   without a handshake, which this server never sends).
+//   Legacy (opt-in: --allow-legacy-extension / BROWSER_MCP_ALLOW_LEGACY_EXTENSION=1): a
+//   protocol 2 hello is accepted without a key and answered with { type: "welcome", protocol: 2, pid }.
+//
+// Client (satellite / script) auth, first thing on an Origin-less socket (Nc / Np = 32 random
+// bytes as lowercase hex, HMAC = HMAC-SHA256 keyed with the hex-decoded token of the port, port
+// as above; the raw token never crosses the socket, and the client checks the primary first):
+//   SAT -> MCP: { type: "auth", v: 2, nonce: Nc }
+//   MCP -> SAT: { type: "auth_challenge", nonce: Np, proof: HMAC("browser-mcp/client|server|<port>|<Nc>|<Np>") }
+//   SAT -> MCP: { type: "auth_proof", proof: HMAC("browser-mcp/client|client|<port>|<Np>|<Nc>") }
+//   MCP -> SAT: { type: "auth_ok", pid }      (a wrong proof or any other frame: 4001)
+//   Legacy, still accepted (scripts, older processes): { type: "auth", token } -> { type: "auth_ok", pid }.
+//   It hands the raw token to whatever listens on the port, so it is no check of the primary.
+//
+// Messages after the handshake:
 //   MCP  -> EXT: { id, action, tabId?, payload?, timeoutMs }   (command)
 //   EXT  -> MCP: { id, ok, result?, error? }                    (response, only from the socket the command went to)
+//   MCP  -> EXT: { type: "cancel", id }                         (the caller gave up on command id; a late reply is ignored)
 //   EXT  -> MCP: { type: "event", kind: "console" | "network" | "perms", data }
-//   SAT  -> MCP: { type: "auth", token }  -> MCP replies { type: "auth_ok", pid }
 //   SAT  -> MCP: { id, action, payload?, tabId?, timeoutMs?, launch? }  (relay / control plane)
+//   SAT  -> MCP: { type: "cancel", id }   (id = the satellite's request id; forwarded as the extension's command id)
 //   MCP  -> SAT: every accepted extension event is broadcast unchanged.
 
 export interface BridgeRequest {
@@ -46,6 +84,15 @@ export interface BridgeResponse {
   error?: string;
 }
 
+/** Optional 5th argument of IBridge.send. */
+export interface SendOptions {
+  /**
+   * Aborting it rejects the send() with an Error named "AbortError" (message
+   * "cancelled") and tells the extension to stop the command.
+   */
+  signal?: AbortSignal;
+}
+
 type Pending = {
   resolve: (v: unknown) => void;
   reject: (e: Error) => void;
@@ -53,6 +100,8 @@ type Pending = {
   /** Socket the request was sent on; only that socket may answer it. */
   ws: WebSocket;
   action: string;
+  /** Detaches the caller's abort listener (null without a signal). */
+  unlisten: (() => void) | null;
 };
 
 /** Fields every bridge reports for browser_status (spread into the tool result). */
@@ -66,16 +115,41 @@ export interface BridgeStatusInfo {
    * -1 when unknown (satellite that hasn't polled yet).
    */
   peers: number;
-  /** Extension sockets that completed the hello handshake. */
+  /** Extension sockets that completed the handshake. */
   extensions?: number;
   /** Effective trusted extension ids (["*"] in legacy accept-all mode). */
   trustedExtensionIds?: string[];
   /** Last (up to 10) extension ids that were refused with 4003. */
   rejectedExtensionIds?: string[];
-  /** True while trust-on-first-use pairing is still open. */
+  /** True while trust-on-first-use of an extension id is still open. */
   tofuOpen?: boolean;
-  /** Directory holding the token / trust / sticky-browser files. */
+  /** Directory holding the token / trust / key / sticky-browser files. */
   configDir?: string;
+  /** Version the active extension reported in its hello (null: none connected). */
+  extensionVersion?: string | null;
+  /** Bridge protocol of the active extension (3, or 2 in legacy mode; null: none connected). */
+  extensionProtocol?: number | null;
+  /** True while a new extension install may pair (none paired yet, or the --pair window). */
+  pairingOpen?: boolean;
+  /** Extension installs holding a pairing key (extension-keys.json). */
+  pairedInstalls?: number;
+  /** Version of the browser-mcp server that owns the bridge (the primary). */
+  serverVersion?: string;
+  /** Bridge protocol the primary speaks. */
+  bridgeProtocol?: number;
+  /** Protocol-2 extensions are accepted without a key (--allow-legacy-extension). */
+  legacyExtensionAllowed?: boolean;
+  /** Last extension handshake refused by the primary or, with 4100 / 4101, by the extension (null: none). */
+  lastExtensionRefusal?: ExtensionRefusal | null;
+}
+
+/** A refused extension handshake (close code and reason as sent by the side that refused). */
+export interface ExtensionRefusal {
+  code: number;
+  reason: string;
+  extensionId: string;
+  /** Epoch ms. */
+  at: number;
 }
 
 /** Reply of the `__bridge_status` control action. */
@@ -94,11 +168,16 @@ export interface IBridge {
   readonly mode: "primary" | "satellite";
   consoleEvents: Array<unknown>;
   networkEvents: Array<unknown>;
-  /** Extra status fields for browser_status (mode/pid/peers/trust info). */
+  /** Extra status fields for browser_status (mode/pid/peers/trust/pairing info). */
   status(): BridgeStatusInfo;
   /** Last disabled-actions snapshot from the extension (hello / perms events); null = unknown. */
   knownDisabled(): string[] | null;
-  send<T = unknown>(action: string, payload?: unknown, tabId?: number, timeoutMs?: number): Promise<T>;
+  /**
+   * Called with the new snapshot whenever knownDisabled() changes (not for
+   * repeats of the same set). Returns the unsubscribe function.
+   */
+  onPermsChange(cb: (disabled: string[] | null) => void): () => void;
+  send<T = unknown>(action: string, payload?: unknown, tabId?: number, timeoutMs?: number, opts?: SendOptions): Promise<T>;
   launchBrowser(timeoutMs?: number): Promise<{ connected: boolean; launched: boolean; detail: string }>;
   closeBrowser(force?: boolean): Promise<{ closed: boolean; detail: string }>;
   close(): void;
@@ -142,10 +221,25 @@ function asBrowserId(v: unknown): BrowserId | null {
 
 /** Edge Add-ons store id of Browser MCP (always trusted). */
 const BUILTIN_EXTENSION_IDS = ["hdhibkihdkndmfecegdnbpebolhokkbh"];
-const PROTOCOL_VERSION = 2;
+/** Bridge protocol spoken by this server (see the header comment). */
+export const BRIDGE_PROTOCOL = 3;
+/** Unauthenticated protocol of 0.3.x extensions, only with allowLegacyExtension. */
+const LEGACY_PROTOCOL = 2;
+/**
+ * Close codes the extension sends when it refuses this server during the handshake, with their
+ * reasons. (It also sends 4102 server-outdated, but only for a welcome without a handshake, which
+ * this server never sends, so a 4102 here can only come from a forged socket.)
+ */
+const EXTENSION_REFUSALS: ReadonlyMap<number, string> = new Map([
+  [4100, "pair-declined"],
+  [4101, "server-auth-failed"],
+]);
+/** A satellite waits this much longer per failed authentication of the primary, up to the cap (ms). */
+const AUTH_BACKOFF_MAX_MS = 30000;
+/** This server's version (package.json), sent in welcome and shown in status. */
+export const SERVER_VERSION: string = typeof pkg.version === "string" ? pkg.version : "0.0.0";
 /** Large results (full-page screenshots, PDFs, audio) travel as one frame. */
 const MAX_PAYLOAD = 256 * 1024 * 1024;
-const AUTH_TIMEOUT_MS = 5000;
 const RELAY_TIMEOUT_DEFAULT = 30000;
 const RELAY_TIMEOUT_MIN = 1000;
 const RELAY_TIMEOUT_MAX = 7_200_000;
@@ -155,23 +249,94 @@ const MAX_BUF = 1000;
 const EVENT_MAX_CHARS = 2 * 1024 * 1024;
 /** Skip event broadcasts to a satellite whose socket is this far behind. */
 const BROADCAST_BACKLOG_LIMIT = 16 * 1024 * 1024;
+/** Upper bound of remembered installs; the oldest pairing is dropped first. */
+const MAX_INSTALLS = 100;
+
+/** Timings of a bridge; tests shrink them, production uses DEFAULT_TIMINGS. */
+export interface BridgeTimings {
+  /** Satellites must authenticate, and extensions finish the handshake, within this (ms). */
+  authTimeoutMs: number;
+  /**
+   * After a fresh bind (startup / failover) or an extension drop, the extension
+   * usually reconnects within its backoff (<= 10 s). Wait this long before
+   * auto-launching a browser so we don't open stray windows (A6).
+   */
+  reconnectGraceMs: number;
+  /** After a failed auto-launch, fail fast for this long instead of relaunching (ms). */
+  autoLaunchCooldownMs: number;
+  /** The pair option keeps the pairing window open this long after start (ms). */
+  pairWindowMs: number;
+  /** Satellite: ready() rejects when no link / takeover succeeded within this (ms). */
+  satelliteReadyDeadlineMs: number;
+  /** Satellite: __bridge_status poll interval (ms). */
+  statusPollMs: number;
+  /** Satellite: one status poll times out after this long (ms). */
+  statusTimeoutMs: number;
+  /** Satellite: consecutive status timeouts before it fails over. */
+  statusFailsBeforeFailover: number;
+  /** Satellite: a failover attempt waits failoverDelayMs + random * failoverJitterMs. */
+  failoverDelayMs: number;
+  failoverJitterMs: number;
+}
+
+export const DEFAULT_TIMINGS: Readonly<BridgeTimings> = Object.freeze({
+  authTimeoutMs: 5000,
+  reconnectGraceMs: 12000,
+  autoLaunchCooldownMs: 60000,
+  pairWindowMs: 10 * 60 * 1000,
+  satelliteReadyDeadlineMs: 15000,
+  statusPollMs: 3000,
+  statusTimeoutMs: 8000,
+  statusFailsBeforeFailover: 3,
+  // Jittered: N satellites losing the primary at once must not all bind()
+  // in the same millisecond (thundering herd). Spread 1.2-3.2 s.
+  failoverDelayMs: 1200,
+  failoverJitterMs: 2000,
+});
+
+function resolveTimings(t: Partial<BridgeTimings> | undefined): BridgeTimings {
+  const out: BridgeTimings = { ...DEFAULT_TIMINGS };
+  if (!t) return out;
+  for (const k of Object.keys(out) as Array<keyof BridgeTimings>) {
+    const v = t[k];
+    if (typeof v === "number" && Number.isFinite(v) && v >= 0) out[k] = v;
+  }
+  return out;
+}
+
 /**
- * After a fresh bind (startup / failover) or an extension drop, the extension
- * usually reconnects within its backoff (<= 10 s). Wait this long before
- * auto-launching a browser so we don't open stray windows (A6).
+ * Browser process hooks. Every method is optional in the options; a missing
+ * one uses the real OS probe. Tests inject them so no browser is ever spawned.
  */
-const RECONNECT_GRACE_MS = 12000;
-/** After a failed auto-launch, fail fast for this long instead of relaunching. */
-const AUTO_LAUNCH_COOLDOWN_MS = 60000;
-const SATELLITE_READY_DEADLINE_MS = 15000;
-const STATUS_POLL_MS = 3000;
-const STATUS_TIMEOUT_MS = 8000;
-const STATUS_FAILS_BEFORE_FAILOVER = 3;
+export interface BrowserLauncher {
+  /** Start a browser binary, detached. */
+  spawn(bin: string, args: string[]): void;
+  /** Which supported browser families have a running process. */
+  running(): Record<BrowserId, boolean> | Promise<Record<BrowserId, boolean>>;
+  /** OS default browser family, when it is one we support. */
+  defaultBrowser(): BrowserId | null;
+  /** Binary of a browser family, or null when it is not installed. */
+  resolve(id: BrowserId): string | null;
+}
 
 const EXT_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const EXT_ORIGIN_RE = /^(?:chrome-extension|moz-extension):\/\/([A-Za-z0-9_-]{1,64})\/?$/;
+const INSTALL_ID_RE = /^[A-Za-z0-9-]{8,64}$/;
+/** Keys, nonces and proofs: 32 bytes as lowercase hex. */
+const HEX64_RE = /^[0-9a-f]{64}$/;
 
 // ---------- small helpers ----------
+
+type Env = Record<string, string | undefined>;
+type LogFn = (line: string) => void;
+
+function defaultLog(line: string): void {
+  console.error(`[bridge:${process.pid}] ${line}`);
+}
+
+function errText(e: unknown): string {
+  return String((e as Error)?.message ?? e);
+}
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
@@ -195,6 +360,11 @@ function parseDisabled(v: unknown): string[] | null {
   const arr = isPlainObject(v) ? v.disabled : undefined;
   if (!Array.isArray(arr)) return null;
   return arr.filter((x): x is string => typeof x === "string" && x.length > 0 && x.length <= 128).slice(0, 1000);
+}
+
+/** Order-insensitive identity of a permission snapshot (change detection). */
+function permsKey(d: string[] | null): string {
+  return d ? JSON.stringify([...d].sort()) : "null";
 }
 
 function clampTimeout(v: unknown, def = RELAY_TIMEOUT_DEFAULT): number {
@@ -222,9 +392,15 @@ function extensionIdFromOrigin(origin: string): string | null {
   return m ? m[1].toLowerCase() : null;
 }
 
-function envLaunchTimeoutMs(): number {
-  const v = Number(process.env.BROWSER_LAUNCH_TIMEOUT_MS ?? 45000);
+function envLaunchTimeoutMs(env: Env): number {
+  const v = Number(env.BROWSER_LAUNCH_TIMEOUT_MS ?? 45000);
   return Number.isFinite(v) && v > 0 ? v : 45000;
+}
+
+/** Boolean switches such as BROWSER_MCP_PAIR=1. */
+function envFlag(v: string | undefined): boolean {
+  const s = (v ?? "").trim().toLowerCase();
+  return s === "1" || s === "true" || s === "yes";
 }
 
 function sleep(ms: number): Promise<void> {
@@ -235,25 +411,172 @@ function timeoutError(message: string): Error {
   return Object.assign(new Error(message), { code: "ETIMEDOUT" });
 }
 
-// ---------- config directory (tokens, trusted ids, sticky browser, last permission snapshot) ----------
+/** The error a send() rejects with when its AbortSignal fires. */
+export function abortError(): Error {
+  const e = new Error("cancelled");
+  e.name = "AbortError";
+  return e;
+}
 
-let ensuredConfigDir: string | null = null;
+export function isAbortError(e: unknown): boolean {
+  return (e as { name?: unknown } | null)?.name === "AbortError";
+}
+
+/** Settle bookkeeping shared by every path that ends a pending request. */
+function takePending(pending: Map<string, Pending>, id: string): Pending | null {
+  const p = pending.get(id);
+  if (!p) return null;
+  pending.delete(id);
+  clearTimeout(p.timer);
+  p.unlisten?.();
+  return p;
+}
+
+/**
+ * Register a request, send its frame and settle it on reply (by the caller,
+ * through takePending), timeout, send failure or abort. onAbort runs after
+ * the entry is gone; it sends the cancel frame.
+ */
+function startRequest<T>(
+  pending: Map<string, Pending>,
+  r: {
+    id: string;
+    action: string;
+    ws: WebSocket;
+    frame: () => string;
+    timeoutMs: number;
+    timeoutMessage: string;
+    signal?: AbortSignal;
+    onAbort: () => void;
+  }
+): Promise<T> {
+  if (r.signal?.aborted) return Promise.reject(abortError());
+  return new Promise<T>((resolve, reject) => {
+    const fail = (err: unknown) => {
+      if (!takePending(pending, r.id)) return;
+      reject(err instanceof Error ? err : new Error(String(err)));
+    };
+    const timer = setTimeout(() => fail(timeoutError(r.timeoutMessage)), r.timeoutMs);
+    let unlisten: (() => void) | null = null;
+    const signal = r.signal;
+    if (signal) {
+      const onAbort = () => {
+        if (!takePending(pending, r.id)) return;
+        reject(abortError());
+        try { r.onAbort(); } catch {}
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+      unlisten = () => signal.removeEventListener("abort", onAbort);
+    }
+    pending.set(r.id, { resolve: resolve as (v: unknown) => void, reject, timer, ws: r.ws, action: r.action, unlisten });
+    try {
+      r.ws.send(r.frame(), (err) => {
+        if (err) fail(err);
+      });
+    } catch (e) {
+      fail(e);
+    }
+  });
+}
+
+/** Rejects with AbortError as soon as the signal fires; p keeps running. */
+function raceAbort<T>(p: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) return p;
+  if (signal.aborted) {
+    p.catch(() => {});
+    return Promise.reject(abortError());
+  }
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(abortError());
+    signal.addEventListener("abort", onAbort, { once: true });
+    p.then(
+      (v) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(v);
+      },
+      (e) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(e);
+      }
+    );
+  });
+}
+
+function randomHex(bytes = 32): string {
+  return crypto.randomBytes(bytes).toString("hex");
+}
+
+/**
+ * Handshake proof: HMAC-SHA256 keyed with the hex-decoded install key.
+ * The side label keeps a server proof from ever passing as an extension proof; the port (the one
+ * this server is bound to, the one the extension dialed) keeps a challenge from another primary
+ * that shares the config directory from verifying when a process on the extension's port relays it.
+ */
+function handshakeProof(
+  keyHex: string,
+  side: "server" | "extension",
+  extId: string,
+  installId: string,
+  port: number,
+  first: string,
+  second: string
+): string {
+  return crypto
+    .createHmac("sha256", Buffer.from(keyHex, "hex"))
+    .update(`browser-mcp/v3|${side}|${extId}|${installId}|${port}|${first}|${second}`, "utf8")
+    .digest("hex");
+}
+
+/**
+ * Client (satellite / script) auth proof: HMAC-SHA256 keyed with the hex-decoded bridge token of
+ * `port`. Each side proves the token without sending it; the label and the nonce order keep one
+ * side's proof from passing as the other's.
+ */
+function clientAuthProof(tokenHex: string, side: "server" | "client", port: number, first: string, second: string): string {
+  return crypto
+    .createHmac("sha256", Buffer.from(tokenHex, "hex"))
+    .update(`browser-mcp/client|${side}|${port}|${first}|${second}`, "utf8")
+    .digest("hex");
+}
+
+/** Log a line at most once per `everyMs` for its key. */
+function logThrottledTo(throttle: Map<string, number>, log: LogFn, key: string, line: string, everyMs: number): void {
+  const now = Date.now();
+  const last = throttle.get(key) ?? 0;
+  if (now - last < everyMs) return;
+  if (throttle.size > 200) throttle.clear();
+  throttle.set(key, now);
+  log(line);
+}
+
+function proofMatches(expectedHex: string, got: unknown): boolean {
+  if (typeof got !== "string" || !HEX64_RE.test(got)) return false;
+  return crypto.timingSafeEqual(Buffer.from(expectedHex, "hex"), Buffer.from(got, "hex"));
+}
+
+// ---------- config directory (tokens, trusted ids, install keys, sticky browser, last permission snapshot) ----------
+
+const ensuredDirs = new Set<string>();
+
+/** Create a config directory once per process (owner-only where POSIX modes exist). */
+function ensureDir(dir: string, log: LogFn = defaultLog): string {
+  if (ensuredDirs.has(dir)) return dir;
+  try {
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    ensuredDirs.add(dir);
+  } catch (e) {
+    log(`cannot create config dir ${dir}: ${errText(e)}`);
+  }
+  return dir;
+}
 
 /**
  * Per-user config directory: BROWSER_MCP_HOME or ~/.browser-mcp (created
  * with owner-only permissions where the OS supports POSIX modes).
  */
-export function configDir(): string {
-  const dir = (process.env.BROWSER_MCP_HOME ?? "").trim() || path.join(os.homedir(), ".browser-mcp");
-  if (ensuredConfigDir !== dir) {
-    try {
-      fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-      ensuredConfigDir = dir;
-    } catch (e) {
-      console.error(`[bridge:${process.pid}] cannot create config dir ${dir}: ${(e as Error)?.message ?? e}`);
-    }
-  }
-  return dir;
+export function configDir(env: Env = process.env): string {
+  const dir = (env.BROWSER_MCP_HOME ?? "").trim() || path.join(os.homedir(), ".browser-mcp");
+  return ensureDir(dir);
 }
 
 /** Write a user-private file (0600), atomically where the OS allows it. */
@@ -270,29 +593,29 @@ function writePrivateFile(file: string, data: string): void {
   try { fs.chmodSync(file, 0o600); } catch {}
 }
 
-function tokenFile(port: number): string {
-  return path.join(configDir(), `bridge-${port}.token`);
+function tokenFile(dir: string, port: number): string {
+  return path.join(dir, `bridge-${port}.token`);
 }
 
-function readTokenFile(port: number): string | null {
+function readTokenFile(dir: string, port: number): string | null {
   try {
-    const t = fs.readFileSync(tokenFile(port), "utf8").trim();
+    const t = fs.readFileSync(tokenFile(dir, port), "utf8").trim();
     return /^[0-9a-f]{64}$/i.test(t) ? t : null;
   } catch {
     return null;
   }
 }
 
-function trustedFile(): string {
-  return path.join(configDir(), "trusted-extensions.json");
+function trustedFile(dir: string): string {
+  return path.join(dir, "trusted-extensions.json");
 }
 
 type TrustedFileState = { ids: string[]; state: "missing" | "ok" | "corrupt" };
 
-function readTrustedFile(): TrustedFileState {
+function readTrustedFile(dir: string): TrustedFileState {
   let text: string;
   try {
-    text = fs.readFileSync(trustedFile(), "utf8");
+    text = fs.readFileSync(trustedFile(dir), "utf8");
   } catch (e) {
     if ((e as NodeJS.ErrnoException)?.code === "ENOENT") return { ids: [], state: "missing" };
     return { ids: [], state: "corrupt" };
@@ -311,21 +634,72 @@ function readTrustedFile(): TrustedFileState {
 }
 
 /** Record an extension id in trusted-extensions.json. Never overwrites a corrupt file. */
-function addTrustedFileId(id: string): boolean {
-  const cur = readTrustedFile();
+function addTrustedFileId(dir: string, id: string, log: LogFn): boolean {
+  const cur = readTrustedFile(dir);
   if (cur.state === "corrupt") return false;
   if (cur.ids.includes(id)) return true;
   try {
-    writePrivateFile(trustedFile(), JSON.stringify({ ids: [...cur.ids, id] }, null, 2) + "\n");
+    writePrivateFile(trustedFile(dir), JSON.stringify({ ids: [...cur.ids, id] }, null, 2) + "\n");
     return true;
   } catch (e) {
-    console.error(`[bridge:${process.pid}] cannot write ${trustedFile()}: ${(e as Error)?.message ?? e}`);
+    log(`cannot write ${trustedFile(dir)}: ${errText(e)}`);
     return false;
   }
 }
 
+/** One paired extension install. The key never leaves this file and the handshake. */
+type InstallKey = {
+  extensionId: string;
+  installId: string;
+  /** 32-byte key as lowercase hex. */
+  key: string;
+  /** ISO timestamp of the pairing. */
+  pairedAt: string;
+  browser: string | null;
+};
+
+type KeysFileState = { installs: InstallKey[]; state: "missing" | "ok" | "corrupt" };
+
+function keysFile(dir: string): string {
+  return path.join(dir, "extension-keys.json");
+}
+
+function readKeysFile(dir: string): KeysFileState {
+  let text: string;
+  try {
+    text = fs.readFileSync(keysFile(dir), "utf8");
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException)?.code === "ENOENT") return { installs: [], state: "missing" };
+    return { installs: [], state: "corrupt" };
+  }
+  if (!text.trim()) return { installs: [], state: "missing" };
+  try {
+    const j = JSON.parse(text) as unknown;
+    // Another format version is left alone (never downgraded by a rewrite).
+    if (!isPlainObject(j) || j.version !== 1 || !Array.isArray(j.installs)) return { installs: [], state: "corrupt" };
+    const installs: InstallKey[] = [];
+    for (const it of j.installs) {
+      if (!isPlainObject(it)) continue;
+      const extensionId = typeof it.extensionId === "string" ? it.extensionId.toLowerCase() : "";
+      const installId = typeof it.installId === "string" ? it.installId : "";
+      const key = typeof it.key === "string" ? it.key.toLowerCase() : "";
+      if (!EXT_ID_RE.test(extensionId) || !INSTALL_ID_RE.test(installId) || !HEX64_RE.test(key)) continue;
+      installs.push({
+        extensionId,
+        installId,
+        key,
+        pairedAt: typeof it.pairedAt === "string" ? it.pairedAt.slice(0, 40) : "",
+        browser: typeof it.browser === "string" ? it.browser.slice(0, 32) : null,
+      });
+    }
+    return { installs, state: "ok" };
+  } catch {
+    return { installs: [], state: "corrupt" };
+  }
+}
+
 /** Split a comma separated id list ("*" = accept any extension). */
-function parseIdList(values: Array<string | undefined | null>): { ids: string[]; wildcard: boolean } {
+function parseIdList(values: Array<string | undefined | null>, log: LogFn): { ids: string[]; wildcard: boolean } {
   const ids: string[] = [];
   let wildcard = false;
   for (const v of values) {
@@ -338,7 +712,7 @@ function parseIdList(values: Array<string | undefined | null>): { ids: string[];
         continue;
       }
       if (EXT_ID_RE.test(s)) ids.push(s);
-      else console.error(`[bridge:${process.pid}] ignoring invalid extension id ${JSON.stringify(part.trim())}`);
+      else log(`ignoring invalid extension id ${JSON.stringify(part.trim())}`);
     }
   }
   return { ids: [...new Set(ids)], wildcard };
@@ -350,7 +724,7 @@ type PeerState = {
   kind: "extension" | "client";
   /** Extension id from the Origin header (extension sockets only). */
   extId: string | null;
-  /** client: token verified; extension: hello accepted (trusted). */
+  /** client: token auth completed; extension: handshake completed. */
   authed: boolean;
   /** Socket is being closed by us (rejected); ignore further frames. */
   closing: boolean;
@@ -359,21 +733,92 @@ type PeerState = {
   version: string | null;
   disabled: string[] | null;
   authTimer: ReturnType<typeof setTimeout> | null;
+  /**
+   * Handshake progress. Extension: waiting for hello, for auth (challenge), for pair_accept, or done.
+   * Client: waiting for auth, for auth_proof (challenge), or done.
+   */
+  stage: "hello" | "challenge" | "pair" | "done";
+  /** Bridge protocol from the hello. */
+  protocol: number | null;
+  installId: string | null;
+  /** Nonces of the running handshake (extension's, server's). */
+  nonceE: string | null;
+  nonceS: string | null;
+  /** Key the extension has to prove: the stored one (challenge) or the offered one (pair). */
+  key: string | null;
 };
+
+function newPeer(kind: "extension" | "client", extId: string | null): PeerState {
+  return {
+    kind,
+    extId,
+    authed: false,
+    closing: false,
+    helloAt: 0,
+    browser: null,
+    version: null,
+    disabled: null,
+    authTimer: null,
+    stage: "hello",
+    protocol: null,
+    installId: null,
+    nonceE: null,
+    nonceS: null,
+    key: null,
+  };
+}
 
 export interface ExtensionBridgeOptions {
   exitOnAddrInUse?: boolean;
   /** Extra trusted extension ids (e.g. from --extension-id). "*" = accept any. */
   extensionIds?: string[];
+  /**
+   * Open the pairing window for one new extension install, for 10 minutes
+   * after start (--pair). Default: BROWSER_MCP_PAIR=1.
+   */
+  pair?: boolean;
+  /**
+   * Accept protocol-2 (0.3.x) extensions without a key: the link is then NOT
+   * authenticated (--allow-legacy-extension). Default: BROWSER_MCP_ALLOW_LEGACY_EXTENSION=1.
+   */
+  allowLegacyExtension?: boolean;
+  /** Config directory (token, trust, keys, sticky browser). Default: BROWSER_MCP_HOME or ~/.browser-mcp. */
+  configDir?: string;
+  /** Environment read for BROWSER_MCP_* / BROWSER* settings. Default: process.env. */
+  env?: Env;
+  /** Timing overrides (tests). */
+  timings?: Partial<BridgeTimings>;
+  /**
+   * false: this bridge never starts a browser by itself (also not for relayed
+   * satellite commands). Default: BROWSER_AUTO_LAUNCH !== "0", and a
+   * satellite's own preference wins for its commands.
+   */
+  autoLaunch?: boolean;
+  /** Browser process hooks (tests); missing ones use the real OS probes. */
+  launcher?: Partial<BrowserLauncher>;
+  /** Log sink for bridge diagnostics. Default: stderr with a [bridge:<pid>] prefix. */
+  log?: (line: string) => void;
+  /**
+   * @internal Start of the pair window (epoch ms). A promoted satellite passes
+   * its own start time so --pair counts from the process start.
+   */
+  pairSince?: number;
 }
 
+/** Options of a satellite; the same set is used when it promotes itself to primary. */
+export type BridgeClientOptions = Omit<ExtensionBridgeOptions, "exitOnAddrInUse" | "pairSince">;
+
 export class ExtensionBridge implements IBridge {
-  public readonly port: number;
+  private readonly requestedPort: number;
+  /** Bound port once listening (differs from the requested one for port 0). */
+  private boundPort: number | null = null;
   private wss: WebSocketServer;
   private peers = new Map<WebSocket, PeerState>();
-  /** Extension socket that most recently completed hello; receives commands. */
+  /** Extension socket that most recently completed the handshake; receives commands. */
   private active: WebSocket | null = null;
   private pending = new Map<string, Pending>();
+  /** In-flight relayed commands per satellite socket: its request id -> abort handle. */
+  private relays = new Map<WebSocket, Map<string, AbortController>>();
   private readyResolve: (() => void) | null = null;
   private readyReject: ((e: Error) => void) | null = null;
   private readySettled = false;
@@ -394,35 +839,55 @@ export class ExtensionBridge implements IBridge {
   private disabledFromDisk = false;
   // Last snapshot written to perms-<port>.json (skips redundant writes).
   private persistedPerms: string | null = null;
+  private permsListeners = new Set<(disabled: string[] | null) => void>();
+  private lastEmittedPerms = "null";
   private readonly token = crypto.randomBytes(32).toString("hex");
   private readonly explicitIds: Set<string>;
   private readonly wildcard: boolean;
   /** Explicit list given (env/CLI): no trust-on-first-use. */
   private readonly strict: boolean;
   private sessionTrusted = new Set<string>();
+  /** Installs paired while extension-keys.json could not be written (this run only). */
+  private sessionKeys = new Map<string, InstallKey>();
   private rejected: string[] = [];
+  private lastRefusal: ExtensionRefusal | null = null;
   private logThrottle = new Map<string, number>();
+  private readonly env: Env;
+  private readonly configDirOpt: string | null;
+  private readonly timings: BridgeTimings;
+  private readonly autoLaunchOpt: boolean | undefined;
+  private readonly launcher: Partial<BrowserLauncher>;
+  private readonly log: LogFn;
+  private readonly pairOpt: boolean;
+  private readonly pairSince: number;
+  /** A new install paired in this process (closes the pair-option window). */
+  private pairedThisRun = false;
+  private readonly allowLegacy: boolean;
 
   // ring buffers for pushed events (so tools work even with polling)
   consoleEvents: Array<unknown> = [];
   networkEvents: Array<unknown> = [];
 
   constructor(port: number, opts?: ExtensionBridgeOptions) {
-    this.port = port;
+    this.requestedPort = port;
     this.exitOnAddrInUse = opts?.exitOnAddrInUse ?? true;
-    const parsed = parseIdList([process.env.BROWSER_MCP_EXTENSION_IDS, ...(opts?.extensionIds ?? [])]);
+    this.env = opts?.env ?? process.env;
+    this.configDirOpt = opts?.configDir?.trim() ? path.resolve(opts.configDir.trim()) : null;
+    this.timings = resolveTimings(opts?.timings);
+    this.autoLaunchOpt = opts?.autoLaunch;
+    this.launcher = opts?.launcher ?? {};
+    this.log = opts?.log ?? defaultLog;
+    this.pairOpt = opts?.pair ?? envFlag(this.env.BROWSER_MCP_PAIR);
+    this.pairSince = opts?.pairSince ?? Date.now();
+    this.allowLegacy = opts?.allowLegacyExtension ?? envFlag(this.env.BROWSER_MCP_ALLOW_LEGACY_EXTENSION);
+    const parsed = parseIdList([this.env.BROWSER_MCP_EXTENSION_IDS, ...(opts?.extensionIds ?? [])], this.log);
     this.explicitIds = new Set(parsed.ids);
     this.wildcard = parsed.wildcard;
     this.strict = !parsed.wildcard && parsed.ids.length > 0;
     // Last permission snapshot from a previous run (F14): browser_close stays
     // refused after a restart while the extension is silent. A hello or perms
-    // event from the extension replaces it.
-    const persisted = this.readPersistedPerms();
-    if (persisted) {
-      this.lastDisabled = persisted;
-      this.disabledFromDisk = true;
-      this.enforceEventPerms();
-    }
+    // event from the extension replaces it. Port 0 has no file name until bound.
+    if (port !== 0) this.loadPersistedPerms();
     this.wss = new WebSocketServer({
       port,
       host: "127.0.0.1",
@@ -447,7 +912,7 @@ export class ExtensionBridge implements IBridge {
       try {
         this.onConnection(ws, req);
       } catch (e) {
-        console.error(`[bridge:${process.pid}] connection handler failed: ${(e as Error)?.message ?? e}`);
+        this.log(`connection handler failed: ${errText(e)}`);
         try { ws.terminate(); } catch {}
       }
     });
@@ -459,9 +924,9 @@ export class ExtensionBridge implements IBridge {
       if (code === "EADDRINUSE" && !this.exitOnAddrInUse) {
         // Expected on every satellite startup: keep it a one-liner, the full
         // Bun code-frame dump looks like a crash and scares users.
-        console.error(`[bridge:${process.pid}] port ${port} in use, will join as satellite`);
+        this.log(`port ${port} in use, will join as satellite`);
       } else {
-        console.error(`[bridge:${process.pid}] wss error`, e);
+        this.log(`wss error: ${errText(e)}`);
       }
       if (!this.readySettled) {
         this.readySettled = true;
@@ -477,23 +942,40 @@ export class ExtensionBridge implements IBridge {
     });
     this.wss.on("listening", () => {
       this.listeningAt = Date.now();
-      console.error(`[bridge:${process.pid}] ws listening on ws://127.0.0.1:${port} (primary)`);
+      const addr = this.wss.address();
+      if (addr && typeof addr === "object" && typeof addr.port === "number") this.boundPort = addr.port;
+      if (port === 0) this.loadPersistedPerms();
+      this.log(`ws listening on ws://127.0.0.1:${this.port} (primary)`);
       // Satellites / CLI scripts authenticate with this per-run token.
+      const tf = tokenFile(this.dir(), this.port);
       try {
-        writePrivateFile(tokenFile(port), this.token);
+        writePrivateFile(tf, this.token);
       } catch (e) {
-        console.error(`[bridge:${process.pid}] cannot write bridge token ${tokenFile(port)} (satellites will be refused): ${(e as Error)?.message ?? e}`);
+        this.log(`cannot write bridge token ${tf} (satellites will be refused): ${errText(e)}`);
       }
       if (this.wildcard) {
-        console.error(`[bridge:${process.pid}] WARNING: BROWSER_MCP_EXTENSION_IDS=* accepts ANY browser extension as the bridge extension (legacy mode)`);
+        this.log(`WARNING: BROWSER_MCP_EXTENSION_IDS=* accepts ANY browser extension as the bridge extension (legacy mode)`);
       } else if (this.tofuOpen()) {
-        console.error(`[bridge:${process.pid}] no trusted extension paired yet; the first extension that connects will be trusted (${trustedFile()})`);
+        this.log(`no trusted extension paired yet; the first extension that connects will be trusted (${trustedFile(this.dir())})`);
+      }
+      if (this.pairedInstallCount() === 0) {
+        this.log(`no extension install paired yet; the first install that connects gets a pairing key (${keysFile(this.dir())})`);
+      } else if (this.pairOptionOpen()) {
+        this.log(`pairing open for one new extension install for ${Math.round(this.timings.pairWindowMs / 60000)} min (--pair)`);
+      }
+      if (this.allowLegacy) {
+        this.log(`WARNING: protocol-2 extensions are accepted WITHOUT authentication (--allow-legacy-extension); update the extension and drop this option`);
       }
       if (!this.readySettled) {
         this.readySettled = true;
         this.readyResolve?.();
       }
     });
+  }
+
+  /** Bound port once listening (the requested one before that). */
+  get port(): number {
+    return this.boundPort ?? this.requestedPort;
   }
 
   /** Resolves when the WS server is listening, rejects on bind failure. */
@@ -519,6 +1001,11 @@ export class ExtensionBridge implements IBridge {
     return "primary";
   }
 
+  /** Config directory of this bridge (option, else BROWSER_MCP_HOME / ~/.browser-mcp). */
+  private dir(): string {
+    return this.configDirOpt ? ensureDir(this.configDirOpt, this.log) : configDir(this.env);
+  }
+
   /** Authenticated satellite / CLI sockets on this bridge. */
   peerCount(): number {
     let n = 0;
@@ -537,6 +1024,7 @@ export class ExtensionBridge implements IBridge {
   }
 
   status(): BridgeStatusInfo {
+    const active = this.active ? this.peers.get(this.active) : undefined;
     return {
       mode: "primary",
       pid: process.pid,
@@ -545,7 +1033,15 @@ export class ExtensionBridge implements IBridge {
       trustedExtensionIds: this.trustedIds(),
       rejectedExtensionIds: [...this.rejected],
       tofuOpen: this.tofuOpen(),
-      configDir: configDir(),
+      configDir: this.dir(),
+      extensionVersion: active?.version ?? null,
+      extensionProtocol: active?.protocol ?? null,
+      pairingOpen: this.pairingOpen(),
+      pairedInstalls: this.pairedInstallCount(),
+      serverVersion: SERVER_VERSION,
+      bridgeProtocol: BRIDGE_PROTOCOL,
+      legacyExtensionAllowed: this.allowLegacy,
+      lastExtensionRefusal: this.lastRefusal ? { ...this.lastRefusal } : null,
     };
   }
 
@@ -564,6 +1060,28 @@ export class ExtensionBridge implements IBridge {
     return this.lastDisabled ? [...this.lastDisabled] : null;
   }
 
+  onPermsChange(cb: (disabled: string[] | null) => void): () => void {
+    this.permsListeners.add(cb);
+    return () => {
+      this.permsListeners.delete(cb);
+    };
+  }
+
+  /** Tell subscribers about a changed snapshot (repeats of the same set are skipped). */
+  private emitPerms(): void {
+    const d = this.knownDisabled();
+    const key = permsKey(d);
+    if (key === this.lastEmittedPerms) return;
+    this.lastEmittedPerms = key;
+    for (const cb of [...this.permsListeners]) {
+      try {
+        cb(d ? [...d] : null);
+      } catch (e) {
+        this.log(`perms listener failed: ${errText(e)}`);
+      }
+    }
+  }
+
   /**
    * @internal Used by BridgeClient when a satellite promotes itself: carry
    * over the last permission snapshot and buffered events.
@@ -579,53 +1097,129 @@ export class ExtensionBridge implements IBridge {
     if (!this.consoleEvents.length) for (const e of s.consoleEvents.slice(-MAX_BUF)) this.consoleEvents.push(e);
     if (!this.networkEvents.length) for (const e of s.networkEvents.slice(-MAX_BUF)) this.networkEvents.push(e);
     this.enforceEventPerms();
+    this.emitPerms();
   }
 
   // ----- trust -----
 
   private trustedIds(): string[] {
     if (this.wildcard) return ["*"];
-    const all = new Set<string>([...BUILTIN_EXTENSION_IDS, ...this.explicitIds, ...this.sessionTrusted, ...readTrustedFile().ids]);
+    const all = new Set<string>([...BUILTIN_EXTENSION_IDS, ...this.explicitIds, ...this.sessionTrusted, ...readTrustedFile(this.dir()).ids]);
     return [...all].sort();
   }
 
   private isTrusted(id: string): boolean {
     if (this.wildcard) return true;
     if (BUILTIN_EXTENSION_IDS.includes(id) || this.explicitIds.has(id) || this.sessionTrusted.has(id)) return true;
-    return readTrustedFile().ids.includes(id);
+    return readTrustedFile(this.dir()).ids.includes(id);
   }
 
   /** Trust-on-first-use is open until the first extension is paired. */
   tofuOpen(): boolean {
     if (this.wildcard || this.strict || this.sessionTrusted.size > 0) return false;
-    const t = readTrustedFile();
+    const t = readTrustedFile(this.dir());
     return t.state === "missing" || (t.state === "ok" && t.ids.length === 0);
   }
 
+  // ----- pairing keys -----
+
+  private installKeyId(extId: string, installId: string): string {
+    return `${extId}|${installId}`;
+  }
+
+  private findInstallKey(extId: string, installId: string): InstallKey | null {
+    const keys = readKeysFile(this.dir());
+    const hit = keys.installs.find((i) => i.extensionId === extId && i.installId === installId);
+    return hit ?? this.sessionKeys.get(this.installKeyId(extId, installId)) ?? null;
+  }
+
+  private pairedInstallCount(): number {
+    return readKeysFile(this.dir()).installs.length + this.sessionKeys.size;
+  }
+
+  /** The pair option's window: 10 min from start, closed by the first new install. */
+  private pairOptionOpen(): boolean {
+    return this.pairOpt && !this.pairedThisRun && Date.now() - this.pairSince < this.timings.pairWindowMs;
+  }
+
+  /**
+   * A new install may get a key: none is paired yet (first setup), or the pair
+   * option is active. An unreadable keys file does not count as "none paired".
+   */
+  pairingOpen(): boolean {
+    const keys = readKeysFile(this.dir());
+    if (keys.state !== "corrupt" && keys.installs.length + this.sessionKeys.size === 0) return true;
+    return this.pairOptionOpen();
+  }
+
+  /** Save a new install key (replacing an older key of the same install). */
+  private persistInstall(entry: InstallKey): boolean {
+    const dir = this.dir();
+    const file = keysFile(dir);
+    const cur = readKeysFile(dir);
+    if (cur.state === "corrupt") {
+      // Only reached through an explicit pairing (--pair): keep the unreadable
+      // file for inspection instead of silently overwriting it.
+      const backup = `${file}.corrupt-${Date.now()}`;
+      try {
+        fs.renameSync(file, backup);
+        this.log(`moved unreadable ${file} to ${backup}`);
+      } catch (e) {
+        this.log(`cannot move unreadable ${file} aside: ${errText(e)}`);
+        return false;
+      }
+    }
+    const installs = cur.installs.filter((i) => !(i.extensionId === entry.extensionId && i.installId === entry.installId));
+    installs.push(entry);
+    if (installs.length > MAX_INSTALLS) installs.splice(0, installs.length - MAX_INSTALLS);
+    try {
+      writePrivateFile(file, JSON.stringify({ version: 1, installs }, null, 2) + "\n");
+      return true;
+    } catch (e) {
+      this.log(`cannot write ${file}: ${errText(e)}`);
+      return false;
+    }
+  }
+
   private logThrottled(key: string, line: string, everyMs = 60000): void {
-    const now = Date.now();
-    const last = this.logThrottle.get(key) ?? 0;
-    if (now - last < everyMs) return;
-    if (this.logThrottle.size > 200) this.logThrottle.clear();
-    this.logThrottle.set(key, now);
-    console.error(`[bridge:${process.pid}] ${line}`);
+    logThrottledTo(this.logThrottle, this.log, key, line, everyMs);
+  }
+
+  /** Close a socket we refuse; its later frames are ignored. */
+  private closePeer(ws: WebSocket, peer: PeerState, code: number, reason: string): void {
+    // Handshake refusals explain a "not connected" error later (4006 is a normal replacement).
+    if (peer.kind === "extension" && !peer.authed && code !== 4006) {
+      this.lastRefusal = { code, reason: reason.slice(0, 120), extensionId: peer.extId ?? "unknown", at: Date.now() };
+    }
+    peer.closing = true;
+    if (peer.authTimer) {
+      clearTimeout(peer.authTimer);
+      peer.authTimer = null;
+    }
+    try {
+      ws.close(code, reason.slice(0, 120));
+    } catch {
+      try { ws.terminate(); } catch {}
+    }
   }
 
   private rejectExtension(ws: WebSocket, peer: PeerState): void {
     const id = peer.extId ?? "unknown";
-    peer.closing = true;
     this.rejected = this.rejected.filter((x) => x !== id);
     this.rejected.push(id);
     if (this.rejected.length > MAX_REJECTED) this.rejected.splice(0, this.rejected.length - MAX_REJECTED);
     this.logThrottled(
       `ext:${id}`,
-      `refused untrusted extension ${id} (trust it via BROWSER_MCP_EXTENSION_IDS / --extension-id or ${trustedFile()})`
+      `refused untrusted extension ${id} (trust it via BROWSER_MCP_EXTENSION_IDS / --extension-id or ${trustedFile(this.dir())})`
     );
-    try {
-      ws.close(4003, `untrusted-extension:${id}`.slice(0, 120));
-    } catch {
-      try { ws.terminate(); } catch {}
-    }
+    this.closePeer(ws, peer, 4003, `untrusted-extension:${id}`);
+  }
+
+  /** Untrusted id once trust-on-first-use is closed: refuse with 4003. */
+  private checkTrust(ws: WebSocket, peer: PeerState): boolean {
+    if (this.isTrusted(peer.extId!) || this.tofuOpen()) return true;
+    this.rejectExtension(ws, peer);
+    return false;
   }
 
   // ----- sockets -----
@@ -640,50 +1234,79 @@ export class ExtensionBridge implements IBridge {
         try { ws.terminate(); } catch {}
         return;
       }
-      peer = { kind: "extension", extId, authed: false, closing: false, helloAt: 0, browser: null, version: null, disabled: null, authTimer: null };
+      peer = newPeer("extension", extId);
     } else {
-      peer = { kind: "client", extId: null, authed: false, closing: false, helloAt: 0, browser: null, version: null, disabled: null, authTimer: null };
+      peer = newPeer("client", null);
     }
     this.peers.set(ws, peer);
     ws.on("message", (raw) => {
       try {
         this.onMessage(ws, rawToText(raw));
       } catch (e) {
-        console.error(`[bridge:${process.pid}] bad frame ignored: ${(e as Error)?.message ?? e}`);
+        this.log(`bad frame ignored: ${errText(e)}`);
       }
     });
-    ws.on("close", () => {
+    ws.on("close", (code: number) => {
       try {
+        this.noteExtensionRefusal(ws, code);
         this.onClose(ws);
       } catch (e) {
-        console.error(`[bridge:${process.pid}] close handler failed: ${(e as Error)?.message ?? e}`);
+        this.log(`close handler failed: ${errText(e)}`);
       }
     });
-    ws.on("error", (e) => console.error(`[bridge:${process.pid}] ws error: ${(e as Error)?.message ?? e}`));
+    ws.on("error", (e) => this.log(`ws error: ${errText(e)}`));
 
     if (peer.kind === "extension") {
       // Untrusted id and pairing closed: refuse right away (the extension
       // shows the 4003 reason in its popup).
-      if (!this.isTrusted(peer.extId!) && !this.tofuOpen()) this.rejectExtension(ws, peer);
+      if (!this.isTrusted(peer.extId!) && !this.tofuOpen()) {
+        this.rejectExtension(ws, peer);
+        return;
+      }
+      // A socket that never finishes the handshake must not linger.
+      peer.authTimer = setTimeout(() => {
+        peer.authTimer = null;
+        if (!peer.authed && !peer.closing) this.closePeer(ws, peer, 4008, "handshake-timeout");
+      }, this.timings.authTimeoutMs);
       return;
     }
     peer.authTimer = setTimeout(() => {
       peer.authTimer = null;
       if (!peer.authed) this.refuseClient(ws, peer);
-    }, AUTH_TIMEOUT_MS);
+    }, this.timings.authTimeoutMs);
   }
 
   private refuseClient(ws: WebSocket, peer: PeerState): void {
-    peer.closing = true;
-    if (peer.authTimer) {
-      clearTimeout(peer.authTimer);
-      peer.authTimer = null;
-    }
-    try {
-      ws.close(4001, "auth-required");
-    } catch {
-      try { ws.terminate(); } catch {}
-    }
+    this.closePeer(ws, peer, 4001, "auth-required");
+  }
+
+  /**
+   * The extension refused this server (4100 pair-declined, 4101 server-auth-failed): keep it like
+   * one of our own refusals, so browser_status and the "not connected" error can say what to do.
+   * Sockets we closed ourselves were recorded by closePeer.
+   *
+   * Anything with an extension Origin can close with any code, so only a code that answers this
+   * server's own handshake step counts (4101 after a challenge or a pair offer, 4100 after a pair
+   * offer), and the stored reason is the code's fixed name, never the peer's text.
+   */
+  private noteExtensionRefusal(ws: WebSocket, code: number): void {
+    const peer = this.peers.get(ws);
+    const name = EXTENSION_REFUSALS.get(code);
+    if (!peer || peer.kind !== "extension" || peer.closing || !name) return;
+    const answersOurStep =
+      (code === 4101 && (peer.stage === "challenge" || peer.stage === "pair")) || (code === 4100 && peer.stage === "pair");
+    if (!answersOurStep) return;
+    const refusal: ExtensionRefusal = {
+      code,
+      reason: name,
+      extensionId: peer.extId ?? "unknown",
+      at: Date.now(),
+    };
+    this.lastRefusal = refusal;
+    this.logThrottled(
+      `ext-refusal:${refusal.extensionId}:${code}`,
+      `extension ${refusal.extensionId} refused this server (${code} ${refusal.reason}): ${this.refusalText(refusal)}`
+    );
   }
 
   private onClose(ws: WebSocket): void {
@@ -693,13 +1316,18 @@ export class ExtensionBridge implements IBridge {
     // Reject only the requests that were sent to this socket.
     for (const [id, p] of this.pending) {
       if (p.ws !== ws) continue;
-      clearTimeout(p.timer);
-      this.pending.delete(id);
+      takePending(this.pending, id);
       p.reject(new Error("Extension disconnected"));
+    }
+    // A departed satellite no longer waits for its commands: stop them.
+    const relays = this.relays.get(ws);
+    if (relays) {
+      this.relays.delete(ws);
+      for (const ctrl of relays.values()) ctrl.abort();
     }
     if (!peer || peer.kind !== "extension" || !peer.authed || this.active !== ws) return;
     this.active = null;
-    // Fall back to the most recently hello'd other open extension socket.
+    // Fall back to the most recently authenticated other open extension socket.
     let best: [WebSocket, PeerState] | null = null;
     for (const [s, p] of this.peers) {
       if (p.kind !== "extension" || !p.authed || p.closing || s.readyState !== WebSocket.OPEN) continue;
@@ -707,12 +1335,12 @@ export class ExtensionBridge implements IBridge {
     }
     if (best) {
       this.active = best[0];
-      console.error(`[bridge:${process.pid}] extension ${peer.extId} disconnected, switched to ${best[1].extId} (${best[1].browser ?? "?"})`);
+      this.log(`extension ${peer.extId} disconnected, switched to ${best[1].extId} (${best[1].browser ?? "?"})`);
       this.applyActivePerms();
       this.notifyConnected();
     } else {
       this.lastExtDropAt = Date.now();
-      console.error(`[bridge:${process.pid}] extension disconnected`);
+      this.log("extension disconnected");
     }
   }
 
@@ -731,25 +1359,31 @@ export class ExtensionBridge implements IBridge {
     else this.onClientMessage(ws, peer, msg);
   }
 
+  private sendFrame(ws: WebSocket, frame: Record<string, unknown>): void {
+    if (ws.readyState !== WebSocket.OPEN) return;
+    try { ws.send(JSON.stringify(frame)); } catch {}
+  }
+
   // ----- extension side -----
 
   private onExtensionMessage(ws: WebSocket, peer: PeerState, msg: Record<string, unknown>, text: string): void {
-    if (msg.type === "hello") {
-      if (msg.role === "extension") this.onHello(ws, peer, msg);
+    if (!peer.authed) {
+      // Nothing but the handshake frame of the current step is accepted
+      // before the extension is authenticated.
+      if (peer.stage === "hello" && msg.type === "hello" && msg.role === "extension") this.onHello(ws, peer, msg);
+      else if (peer.stage === "challenge" && msg.type === "auth") this.onExtensionProof(ws, peer, msg, false);
+      else if (peer.stage === "pair" && msg.type === "pair_accept") this.onExtensionProof(ws, peer, msg, true);
       return;
     }
-    // Nothing but hello is accepted before the extension is trusted.
-    if (!peer.authed) return;
     if (msg.type === "event") {
       this.onEvent(ws, peer, msg, text);
       return;
     }
-    if (typeof msg.id !== "string") return; // ping and unknown frames
+    if (typeof msg.id !== "string") return; // ping, a repeated hello and unknown frames
     // Response: accepted only from the socket the command was sent to.
     const p = this.pending.get(msg.id);
     if (!p || p.ws !== ws) return;
-    this.pending.delete(msg.id);
-    clearTimeout(p.timer);
+    takePending(this.pending, msg.id);
     const res = msg as unknown as BridgeResponse;
     if (res.ok) p.resolve(res.result);
     else p.reject(new Error((typeof res.error === "string" && res.error) || "extension error"));
@@ -757,54 +1391,166 @@ export class ExtensionBridge implements IBridge {
 
   private onHello(ws: WebSocket, peer: PeerState, msg: Record<string, unknown>): void {
     const id = peer.extId!;
-    let pinned = false;
-    if (!this.isTrusted(id)) {
-      if (!this.tofuOpen()) {
-        this.rejectExtension(ws, peer);
-        return;
-      }
-      pinned = true;
-    }
-    // Record every accepted extension (closes trust-on-first-use after the
-    // first pairing). Legacy accept-all mode records nothing.
-    if (!this.wildcard) {
-      this.sessionTrusted.add(id);
-      if (!addTrustedFileId(id)) {
-        console.error(`[bridge:${process.pid}] could not record extension ${id} in ${trustedFile()} (kept for this session only)`);
-      }
-    }
-    if (pinned) {
-      console.error(`[bridge:${process.pid}] paired with extension ${id} (trust-on-first-use, saved to ${trustedFile()})`);
-      // Pairing is now closed: drop other not-yet-trusted extension sockets.
-      for (const [s, p] of this.peers) {
-        if (s !== ws && p.kind === "extension" && !p.authed && !p.closing && !this.isTrusted(p.extId!)) this.rejectExtension(s, p);
-      }
-    }
-    const claimedId = typeof msg.extensionId === "string" ? msg.extensionId.toLowerCase() : null;
-    if (claimedId && claimedId !== id) {
-      console.error(`[bridge:${process.pid}] extension hello claims id ${claimedId.slice(0, 64)} but its Origin is ${id}; using the Origin`);
-    }
-    const wasActive = this.active === ws;
-    peer.authed = true;
-    peer.helloAt = Date.now();
+    const protocol = typeof msg.protocol === "number" && Number.isSafeInteger(msg.protocol) ? msg.protocol : null;
+    peer.protocol = protocol;
     peer.browser = asBrowserId(msg.browser);
     peer.version = typeof msg.version === "string" ? msg.version.slice(0, 32) : null;
     const perms = parseDisabled(msg.perms);
     if (perms) peer.disabled = perms;
+    const claimedId = typeof msg.extensionId === "string" ? msg.extensionId.toLowerCase() : null;
+    if (claimedId && claimedId !== id) {
+      this.log(`extension hello claims id ${claimedId.slice(0, 64)} but its Origin is ${id}; using the Origin`);
+    }
+
+    if (protocol !== BRIDGE_PROTOCOL) {
+      if (protocol === LEGACY_PROTOCOL && this.allowLegacy) {
+        if (!this.checkTrust(ws, peer)) return;
+        this.logThrottled(
+          "legacy-ext",
+          `WARNING: extension ${id} speaks bridge protocol 2; accepted WITHOUT authentication because legacy extensions are allowed (any local process could pose as it). Update the extension.`,
+          10 * 60 * 1000
+        );
+        this.completeHandshake(ws, peer, null);
+        return;
+      }
+      const ext = protocol === null ? "none" : String(protocol);
+      const update = protocol !== null && protocol > BRIDGE_PROTOCOL ? "the server" : "the extension";
+      this.logThrottled(
+        `proto:${id}:${ext}`,
+        `refused extension ${id}: it speaks bridge protocol ${ext}, this server speaks ${BRIDGE_PROTOCOL} (update ${update})`
+      );
+      this.closePeer(ws, peer, 4002, `protocol-mismatch:server=${BRIDGE_PROTOCOL},ext=${ext}`);
+      return;
+    }
+    if (!this.checkTrust(ws, peer)) return;
+
+    const installId = typeof msg.installId === "string" && INSTALL_ID_RE.test(msg.installId) ? msg.installId : null;
+    const nonce = typeof msg.nonce === "string" && HEX64_RE.test(msg.nonce) ? msg.nonce : null;
+    if (!installId || !nonce) {
+      this.logThrottled(`bad-hello:${id}`, `refused extension ${id}: malformed hello (installId / nonce)`);
+      this.closePeer(ws, peer, 1008, "bad-hello");
+      return;
+    }
+    peer.installId = installId;
+    peer.nonceE = nonce;
+    peer.nonceS = randomHex();
+    // An extension that says it lost its key (hasKey:false) cannot answer a
+    // challenge; it may only pair again, and only while pairing is open.
+    const stored = msg.hasKey === false ? null : this.findInstallKey(id, installId);
+    if (stored) {
+      peer.stage = "challenge";
+      peer.key = stored.key;
+      this.sendFrame(ws, {
+        type: "challenge",
+        nonce: peer.nonceS,
+        proof: handshakeProof(stored.key, "server", id, installId, this.port, nonce, peer.nonceS),
+      });
+      return;
+    }
+    if (!this.pairingOpen()) {
+      this.logThrottled(
+        `pairing-closed:${id}`,
+        `refused new install of extension ${id}: pairing is closed (start the server once with --pair or BROWSER_MCP_PAIR=1, or delete ${keysFile(this.dir())})`
+      );
+      this.closePeer(ws, peer, 4004, "pairing-closed");
+      return;
+    }
+    // Fresh key, saved only once the extension proves it accepted it.
+    peer.stage = "pair";
+    peer.key = randomHex();
+    this.sendFrame(ws, { type: "pair", nonce: peer.nonceS, key: peer.key });
+  }
+
+  /** The extension's answer to a challenge (auth) or to a pairing offer (pair_accept). */
+  private onExtensionProof(ws: WebSocket, peer: PeerState, msg: Record<string, unknown>, pairing: boolean): void {
+    const id = peer.extId!;
+    const expected = handshakeProof(peer.key!, "extension", id, peer.installId!, this.port, peer.nonceS!, peer.nonceE!);
+    if (!proofMatches(expected, msg.proof)) {
+      this.logThrottled(`auth-failed:${id}`, `extension ${id} failed authentication (install ${peer.installId})`);
+      this.closePeer(ws, peer, 4005, "auth-failed");
+      return;
+    }
+    // Another install may have paired while this one answered.
+    if (pairing && !this.pairingOpen()) {
+      this.closePeer(ws, peer, 4004, "pairing-closed");
+      return;
+    }
+    this.completeHandshake(ws, peer, pairing ? peer.key : null);
+  }
+
+  /** Handshake done (v3 proof checked, or a legacy hello): the socket becomes the active extension. */
+  private completeHandshake(ws: WebSocket, peer: PeerState, pairedKey: string | null): void {
+    const id = peer.extId!;
+    // Trust may have changed while the extension answered (another id was
+    // pinned first while trust-on-first-use was open).
+    if (!this.checkTrust(ws, peer)) return;
+    if (pairedKey && peer.installId) {
+      const entry: InstallKey = {
+        extensionId: id,
+        installId: peer.installId,
+        key: pairedKey,
+        pairedAt: new Date().toISOString(),
+        browser: peer.browser,
+      };
+      const k = this.installKeyId(id, peer.installId);
+      if (this.persistInstall(entry)) {
+        this.sessionKeys.delete(k);
+      } else {
+        this.sessionKeys.set(k, entry);
+        this.log(`could not save the pairing of extension ${id} in ${keysFile(this.dir())} (kept for this session only)`);
+      }
+      this.pairedThisRun = true;
+      this.log(`paired extension ${id} install ${peer.installId} (${keysFile(this.dir())})`);
+    }
+    // Record every accepted extension (closes trust-on-first-use after the
+    // first pairing). Legacy accept-all mode records nothing.
+    const pinned = !this.isTrusted(id);
+    if (!this.wildcard) {
+      this.sessionTrusted.add(id);
+      if (!addTrustedFileId(this.dir(), id, this.log)) {
+        this.log(`could not record extension ${id} in ${trustedFile(this.dir())} (kept for this session only)`);
+      }
+    }
+    if (pinned) {
+      this.log(`trusted extension ${id} (trust-on-first-use, saved to ${trustedFile(this.dir())})`);
+      // Trust-on-first-use is now closed: drop other not-yet-trusted extension sockets.
+      for (const [s, p] of this.peers) {
+        if (s !== ws && p.kind === "extension" && !p.authed && !p.closing && !this.isTrusted(p.extId!)) this.rejectExtension(s, p);
+      }
+    }
+    peer.key = null;
+    peer.nonceE = null;
+    peer.nonceS = null;
+    peer.stage = "done";
+    peer.authed = true;
+    if (peer.authTimer) {
+      clearTimeout(peer.authTimer);
+      peer.authTimer = null;
+    }
+    peer.helloAt = Date.now();
     // Sticky browser: remember which browser holds the extension so the
     // next launch opens the same one (not hardcoded Chrome-first).
     if (peer.browser) this.rememberBrowser(peer.browser);
-    // The most recent hello owns the extension role (never events/responses).
+    // The most recent handshake owns the extension role (never events/responses).
     this.active = ws;
     this.autoLaunchFailure = null;
-    if (!wasActive) {
-      console.error(
-        `[bridge:${process.pid}] extension connected id=${id} browser=${peer.browser ?? "?"}${peer.version ? ` v${peer.version}` : ""} (peers=${this.peerCount()}, extensions=${this.extensionCount()})`
-      );
+    // The same install connected again: its older socket is stale (or a forgery).
+    if (peer.installId) {
+      for (const [s, p] of this.peers) {
+        if (s !== ws && p.kind === "extension" && p.authed && !p.closing && p.extId === id && p.installId === peer.installId) {
+          this.closePeer(s, p, 4006, "replaced");
+        }
+      }
     }
-    try {
-      ws.send(JSON.stringify({ type: "welcome", protocol: PROTOCOL_VERSION, pid: process.pid }));
-    } catch {}
+    this.log(
+      `extension connected id=${id} browser=${peer.browser ?? "?"}${peer.version ? ` v${peer.version}` : ""} protocol=${peer.protocol ?? "?"} (peers=${this.peerCount()}, extensions=${this.extensionCount()})`
+    );
+    this.sendFrame(
+      ws,
+      peer.protocol === BRIDGE_PROTOCOL
+        ? { type: "welcome", protocol: BRIDGE_PROTOCOL, pid: process.pid, serverVersion: SERVER_VERSION }
+        : { type: "welcome", protocol: LEGACY_PROTOCOL, pid: process.pid }
+    );
     this.applyActivePerms();
     this.notifyConnected();
   }
@@ -818,11 +1564,21 @@ export class ExtensionBridge implements IBridge {
     this.persistPerms();
     this.enforceEventPerms();
     this.broadcast(JSON.stringify({ type: "event", kind: "perms", data: { disabled: this.lastDisabled } }));
+    this.emitPerms();
   }
 
   /** Per-port permission snapshot file in the per-user config dir (F14). */
   private permsFile(): string {
-    return path.join(configDir(), `perms-${this.port}.json`);
+    return path.join(this.dir(), `perms-${this.port}.json`);
+  }
+
+  private loadPersistedPerms(): void {
+    const persisted = this.readPersistedPerms();
+    if (!persisted || (this.lastDisabled && !this.disabledFromDisk)) return;
+    this.lastDisabled = persisted;
+    this.disabledFromDisk = true;
+    this.enforceEventPerms();
+    this.emitPerms();
   }
 
   private readPersistedPerms(): string[] | null {
@@ -844,7 +1600,7 @@ export class ExtensionBridge implements IBridge {
       writePrivateFile(this.permsFile(), data);
       this.persistedPerms = data;
     } catch (e) {
-      this.logThrottled("perms-file", `cannot write ${this.permsFile()}: ${(e as Error)?.message ?? e}`);
+      this.logThrottled("perms-file", `cannot write ${this.permsFile()}: ${errText(e)}`);
     }
   }
 
@@ -903,19 +1659,63 @@ export class ExtensionBridge implements IBridge {
     return a.length === b.length && crypto.timingSafeEqual(a, b);
   }
 
-  private onClientMessage(ws: WebSocket, peer: PeerState, msg: Record<string, unknown>): void {
-    if (!peer.authed) {
-      // The first frame must be a valid auth; anything else is refused.
-      if (msg.type === "auth" && this.checkToken(msg.token)) {
-        peer.authed = true;
-        if (peer.authTimer) {
-          clearTimeout(peer.authTimer);
-          peer.authTimer = null;
+  /**
+   * Client authentication; only the frames of the current step are accepted, anything else is
+   * refused (4001). v2 (satellites): { type: "auth", v: 2, nonce } is answered with an
+   * auth_challenge that proves this primary holds the token of its port, and the client's
+   * auth_proof must prove the same. Legacy { type: "auth", token } (scripts, older processes)
+   * still works, although it hands the raw token to whatever listens on the port.
+   * Client sockets reuse the handshake fields: nonceE = the client's nonce, nonceS = ours.
+   */
+  private onClientAuth(ws: WebSocket, peer: PeerState, msg: Record<string, unknown>): void {
+    if (peer.stage === "hello" && msg.type === "auth") {
+      if (msg.v === 2) {
+        const nonce = typeof msg.nonce === "string" && HEX64_RE.test(msg.nonce) ? msg.nonce : null;
+        if (nonce) {
+          peer.stage = "challenge";
+          peer.nonceE = nonce;
+          peer.nonceS = randomHex();
+          this.sendFrame(ws, {
+            type: "auth_challenge",
+            nonce: peer.nonceS,
+            proof: clientAuthProof(this.token, "server", this.port, nonce, peer.nonceS),
+          });
+          return;
         }
-        try { ws.send(JSON.stringify({ type: "auth_ok", pid: process.pid })); } catch {}
+      } else if (this.checkToken(msg.token)) {
+        this.acceptClient(ws, peer);
         return;
       }
-      this.refuseClient(ws, peer);
+    } else if (peer.stage === "challenge" && msg.type === "auth_proof") {
+      const expected = clientAuthProof(this.token, "client", this.port, peer.nonceS!, peer.nonceE!);
+      if (proofMatches(expected, msg.proof)) {
+        this.acceptClient(ws, peer);
+        return;
+      }
+    }
+    this.refuseClient(ws, peer);
+  }
+
+  private acceptClient(ws: WebSocket, peer: PeerState): void {
+    peer.authed = true;
+    peer.stage = "done";
+    peer.nonceE = null;
+    peer.nonceS = null;
+    if (peer.authTimer) {
+      clearTimeout(peer.authTimer);
+      peer.authTimer = null;
+    }
+    this.sendFrame(ws, { type: "auth_ok", pid: process.pid });
+  }
+
+  private onClientMessage(ws: WebSocket, peer: PeerState, msg: Record<string, unknown>): void {
+    if (!peer.authed) {
+      this.onClientAuth(ws, peer, msg);
+      return;
+    }
+    if (msg.type === "cancel") {
+      // Ids are scoped to the sending socket: a satellite can only cancel its own commands.
+      if (typeof msg.id === "string") this.relays.get(ws)?.get(msg.id)?.abort();
       return;
     }
     // Origin-less sockets can never become the extension.
@@ -933,10 +1733,10 @@ export class ExtensionBridge implements IBridge {
         ws.send(JSON.stringify({ id: replyId, ok, result, error }));
       } catch (e) {
         // e.g. a result that cannot be serialized
-        try { ws.send(JSON.stringify({ id: replyId, ok: false, error: `relay failed: ${(e as Error)?.message ?? e}` })); } catch {}
+        try { ws.send(JSON.stringify({ id: replyId, ok: false, error: `relay failed: ${errText(e)}` })); } catch {}
       }
     };
-    const fail = (err: unknown) => reply(false, undefined, (err as Error)?.message ?? String(err));
+    const fail = (err: unknown) => reply(false, undefined, errText(err));
     const payload = isPlainObject(msg.payload) ? msg.payload : undefined;
     // Satellite control plane: handled locally, never forwarded to the extension.
     if (action.startsWith("__")) {
@@ -954,20 +1754,42 @@ export class ExtensionBridge implements IBridge {
       return;
     }
     const tabId = typeof msg.tabId === "number" && Number.isFinite(msg.tabId) ? msg.tabId : undefined;
-    this.sendWithLaunch(action, msg.payload, tabId, clampTimeout(msg.timeoutMs), parseLaunchPrefs(msg.launch)).then(
-      (r) => reply(true, r),
-      fail
+    // The satellite's request id maps to this abort handle; aborting it sends
+    // the cancel frame with the extension-side command id (sendInner).
+    const ctrl = new AbortController();
+    let relays = this.relays.get(ws);
+    if (!relays) {
+      relays = new Map();
+      this.relays.set(ws, relays);
+    }
+    relays.set(replyId, ctrl);
+    const done = () => {
+      const m = this.relays.get(ws);
+      if (m?.get(replyId) !== ctrl) return;
+      m.delete(replyId);
+      if (!m.size) this.relays.delete(ws);
+    };
+    this.sendWithLaunch(action, msg.payload, tabId, clampTimeout(msg.timeoutMs), parseLaunchPrefs(msg.launch), ctrl.signal).then(
+      (r) => {
+        done();
+        reply(true, r);
+      },
+      (e) => {
+        done();
+        // The satellite already gave up on a cancelled command.
+        if (!ctrl.signal.aborted) fail(e);
+      }
     );
   }
 
   // ----- browser launch -----
 
   get autoLaunch(): boolean {
-    return process.env.BROWSER_AUTO_LAUNCH !== "0";
+    return this.autoLaunchOpt ?? this.env.BROWSER_AUTO_LAUNCH !== "0";
   }
 
   get launchTimeoutMs(): number {
-    return envLaunchTimeoutMs();
+    return envLaunchTimeoutMs(this.env);
   }
 
   /**
@@ -986,11 +1808,11 @@ export class ExtensionBridge implements IBridge {
       } catch {}
       return null;
     };
-    if (process.env.BROWSER_PATH) {
-      const r = byPath(process.env.BROWSER_PATH);
+    if (this.env.BROWSER_PATH) {
+      const r = byPath(this.env.BROWSER_PATH);
       if (r) return r;
     }
-    const name = (process.env.BROWSER ?? "").trim();
+    const name = (this.env.BROWSER ?? "").trim();
     if (name) {
       const asPath = byPath(name);
       if (asPath) return asPath;
@@ -999,10 +1821,10 @@ export class ExtensionBridge implements IBridge {
         const b = this.resolveBrowserBin(id);
         if (b) return b;
       }
-      console.error(`[bridge:${process.pid}] unknown BROWSER=${JSON.stringify(name)} (want chrome|edge|brave|opera or a binary path), ignoring`);
+      this.log(`unknown BROWSER=${JSON.stringify(name)} (want chrome|edge|brave|opera or a binary path), ignoring`);
     }
-    if (process.env.CHROME_PATH) {
-      const r = byPath(process.env.CHROME_PATH);
+    if (this.env.CHROME_PATH) {
+      const r = byPath(this.env.CHROME_PATH);
       if (r) return r;
     }
     return null;
@@ -1040,7 +1862,7 @@ export class ExtensionBridge implements IBridge {
     const pushId = (id: BrowserId) => {
       if (!ids.includes(id)) ids.push(id);
     };
-    const explicitName = (process.env.BROWSER ?? "").trim();
+    const explicitName = (this.env.BROWSER ?? "").trim();
     const explicitId = explicitName ? normalizeBrowserId(explicitName) : null;
     const explicit = this.explicitBrowserBin();
     if (preferred) pushId(preferred);
@@ -1100,12 +1922,7 @@ export class ExtensionBridge implements IBridge {
       const remaining = deadline - Date.now();
       if (remaining < 3000) break;
       try {
-        const proc = Bun.spawn([b, "--new-window", "about:blank"], {
-          stdin: "ignore",
-          stdout: "ignore",
-          stderr: "ignore",
-        });
-        proc.unref();
+        this.spawnBrowser(b, ["--new-window", "about:blank"]);
         spawned = true;
       } catch {}
       const ok = await this.waitForConnection(Math.min(20000, remaining));
@@ -1115,7 +1932,7 @@ export class ExtensionBridge implements IBridge {
     }
     if (this.connected) return { connected: true, launched: spawned, detail: "Extension connected." };
     const rejectedHint = this.rejected.length
-      ? ` Extension id(s) ${this.rejected.join(", ")} connected but are not trusted: add them to BROWSER_MCP_EXTENSION_IDS / --extension-id or ${trustedFile()}.`
+      ? ` Extension id(s) ${this.rejected.join(", ")} connected but are not trusted: add them to BROWSER_MCP_EXTENSION_IDS / --extension-id or ${trustedFile(this.dir())}.`
       : "";
     return {
       connected: false,
@@ -1175,7 +1992,21 @@ export class ExtensionBridge implements IBridge {
     return out;
   }
 
-  private resolveBrowserBin(id: string): string | null {
+  private spawnBrowser(bin: string, args: string[]): void {
+    if (this.launcher.spawn) {
+      this.launcher.spawn(bin, args);
+      return;
+    }
+    const proc = Bun.spawn([bin, ...args], {
+      stdin: "ignore",
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    proc.unref();
+  }
+
+  private resolveBrowserBin(id: BrowserId): string | null {
+    if (this.launcher.resolve) return this.launcher.resolve(id);
     for (const c of this.browserPaths(id)) {
       try {
         fs.accessSync(c);
@@ -1208,6 +2039,7 @@ export class ExtensionBridge implements IBridge {
   }
 
   private defaultBrowserId(): BrowserId | null {
+    if (this.launcher.defaultBrowser) return this.launcher.defaultBrowser();
     try {
       if (process.platform === "win32") {
         const r = Bun.spawnSync([
@@ -1244,7 +2076,7 @@ export class ExtensionBridge implements IBridge {
   /** Per-port sticky browser file in the per-user config dir (A12). */
   private stickyFile(): string {
     try {
-      return path.join(configDir(), `sticky-browser-${this.port}`);
+      return path.join(this.dir(), `sticky-browser-${this.port}`);
     } catch {
       return "";
     }
@@ -1270,6 +2102,7 @@ export class ExtensionBridge implements IBridge {
   }
 
   private async runningBrowsers(): Promise<Record<BrowserId, boolean>> {
+    if (this.launcher.running) return await this.launcher.running();
     const out: Record<BrowserId, boolean> = { chrome: false, edge: false, brave: false, opera: false };
     try {
       if (process.platform !== "win32") {
@@ -1312,7 +2145,7 @@ export class ExtensionBridge implements IBridge {
     return out;
   }
 
-  /** Resolves true as soon as an extension completes hello (A11), false on timeout. */
+  /** Resolves true as soon as an extension completes the handshake (A11), false on timeout. */
   private waitForConnection(timeoutMs: number): Promise<boolean> {
     if (this.connected) return Promise.resolve(true);
     return new Promise((resolve) => {
@@ -1333,7 +2166,7 @@ export class ExtensionBridge implements IBridge {
   private reconnectGraceRemaining(): number {
     const anchor = Math.max(this.listeningAt, this.lastExtDropAt);
     if (!anchor) return 0;
-    return Math.max(0, anchor + RECONNECT_GRACE_MS - Date.now());
+    return Math.max(0, anchor + this.timings.reconnectGraceMs - Date.now());
   }
 
   // ----- browser close -----
@@ -1442,15 +2275,49 @@ export class ExtensionBridge implements IBridge {
 
   private notConnectedError(): Error {
     const hint = this.rejected.length
-      ? ` Untrusted extension id(s) tried to connect: ${this.rejected.join(", ")} (trust via BROWSER_MCP_EXTENSION_IDS / --extension-id or ${trustedFile()}).`
+      ? ` Untrusted extension id(s) tried to connect: ${this.rejected.join(", ")} (trust via BROWSER_MCP_EXTENSION_IDS / --extension-id or ${trustedFile(this.dir())}).`
       : "";
     return new Error(
-      `Browser extension not connected. In Chrome open chrome://extensions -> Developer Mode -> "Load unpacked" and select the extension/ folder. The WS port must be listening.${hint}`
+      `Browser extension not connected. In Chrome open chrome://extensions -> Developer Mode -> "Load unpacked" and select the extension/ folder. The WS port must be listening.${hint}${this.refusalHint()}`
     );
   }
 
-  send<T = unknown>(action: string, payload?: unknown, tabId?: number, timeoutMs = 30000): Promise<T> {
-    return this.sendWithLaunch<T>(action, payload, tabId, timeoutMs, null);
+  /** Why the last extension that tried to connect was refused (recent ones only). */
+  private refusalHint(): string {
+    const r = this.lastRefusal;
+    if (!r || Date.now() - r.at > 10 * 60 * 1000) return "";
+    const text = this.refusalText(r);
+    return text ? ` ${text}` : "";
+  }
+
+  /** What to do about a refused handshake; "" when there is nothing to advise. */
+  private refusalText(r: ExtensionRefusal): string {
+    const keys = keysFile(this.dir());
+    // Both work whatever key either side holds: "Forget pairing" makes the extension ask for a
+    // new key (hasKey:false) and --pair lets this server offer one; with the keys file gone the
+    // server offers a key to every install, which an extension that still holds one accepts
+    // only after the user clicks Re-pair (it closes 4100 and shows the button first).
+    const repair = `use "Forget pairing" in the extension popup and start the server once with --pair (or BROWSER_MCP_PAIR=1), or delete ${keys} and click Re-pair in the popup when it asks.`;
+    switch (r.code) {
+      case 4002:
+        return `An extension with another bridge protocol was refused (${r.reason}): update the older side so both speak protocol ${BRIDGE_PROTOCOL}.`;
+      case 4004:
+        return `A new extension install was refused because pairing is closed: start the server once with --pair (or BROWSER_MCP_PAIR=1) and reconnect the extension, or delete ${keys}.`;
+      case 4005:
+        return `An extension failed the pairing-key check: ${repair}`;
+      case 4008:
+        return "An extension connected but did not finish the handshake in time.";
+      case 4100:
+        return `The extension declined the new pairing key this server offered: it still holds the key of an earlier pairing that this server does not know (for example after ${keys} was deleted, or with another BROWSER_MCP_HOME). If this is the server it should use, click Re-pair in the extension popup.`;
+      case 4101:
+        return `The extension could not verify this server's pairing key (it has been paired with another server or config directory since): ${repair}`;
+      default:
+        return "";
+    }
+  }
+
+  send<T = unknown>(action: string, payload?: unknown, tabId?: number, timeoutMs = 30000, opts?: SendOptions): Promise<T> {
+    return this.sendWithLaunch<T>(action, payload, tabId, timeoutMs, null, opts?.signal);
   }
 
   /** send() with a caller's launch preferences (relayed satellite commands). */
@@ -1459,10 +2326,12 @@ export class ExtensionBridge implements IBridge {
     payload: unknown,
     tabId: number | undefined,
     timeoutMs: number,
-    prefs: LaunchPrefs | null
+    prefs: LaunchPrefs | null,
+    signal?: AbortSignal
   ): Promise<T> {
-    if (this.connected) return this.sendInner<T>(action, payload, tabId, timeoutMs);
-    return (async () => {
+    if (signal?.aborted) return Promise.reject(abortError());
+    if (this.connected) return this.sendInner<T>(action, payload, tabId, timeoutMs, signal);
+    const run = (async () => {
       // An extension that just dropped (or a fresh primary after failover)
       // usually reconnects within its backoff: wait for it instead of
       // spawning a browser window (A6). Skipped when no browser runs at all.
@@ -1470,59 +2339,61 @@ export class ExtensionBridge implements IBridge {
       if (grace > 0) {
         const running = await this.runningBrowsers();
         if (Object.values(running).some(Boolean) && (await this.waitForConnection(grace))) {
-          return this.sendInner<T>(action, payload, tabId, timeoutMs);
+          return this.sendInner<T>(action, payload, tabId, timeoutMs, signal);
         }
       }
-      if (!(prefs?.auto ?? this.autoLaunch)) throw this.notConnectedError();
+      const auto = this.autoLaunchOpt === false ? false : (prefs?.auto ?? this.autoLaunch);
+      if (!auto) throw this.notConnectedError();
       const f = this.autoLaunchFailure;
-      if (f && Date.now() - f.at < AUTO_LAUNCH_COOLDOWN_MS) {
+      const cooldown = this.timings.autoLaunchCooldownMs;
+      if (f && Date.now() - f.at < cooldown) {
         const ago = Math.round((Date.now() - f.at) / 1000);
-        throw new Error(`${f.detail} (auto-launch failed ${ago}s ago and is paused for ${AUTO_LAUNCH_COOLDOWN_MS / 1000}s; call browser_launch to retry now)`);
+        throw new Error(`${f.detail} (auto-launch failed ${ago}s ago and is paused for ${Math.round(cooldown / 1000)}s; call browser_launch to retry now)`);
       }
+      // A cancelled caller must not start a browser.
+      if (signal?.aborted) throw abortError();
       const r = await this.launchBrowser(undefined, { browser: prefs?.browser });
       if (!r.connected || !this.connected) {
         this.autoLaunchFailure = { at: Date.now(), detail: r.detail };
         throw new Error(`${r.detail} (auto-launch ${r.launched ? "tried" : "skipped"})`);
       }
-      return this.sendInner<T>(action, payload, tabId, timeoutMs);
+      return this.sendInner<T>(action, payload, tabId, timeoutMs, signal);
     })();
+    // The wait / launch is shared and keeps going; only this caller gives up.
+    return raceAbort(run, signal);
   }
 
-  private sendInner<T = unknown>(action: string, payload: unknown, tabId: number | undefined, timeoutMs = 30000): Promise<T> {
+  private sendInner<T = unknown>(action: string, payload: unknown, tabId: number | undefined, timeoutMs = 30000, signal?: AbortSignal): Promise<T> {
+    if (signal?.aborted) return Promise.reject(abortError());
     const target = this.active;
     if (!target || target.readyState !== WebSocket.OPEN) return Promise.reject(this.notConnectedError());
     const id = `cmd-${crypto.randomUUID()}`;
     const req: BridgeRequest = { id, action, tabId, payload, timeoutMs };
-    return new Promise<T>((resolve, reject) => {
-      const fail = (err: unknown) => {
-        if (!this.pending.has(id)) return;
-        this.pending.delete(id);
-        clearTimeout(timer);
-        reject(err instanceof Error ? err : new Error(String(err)));
-      };
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(timeoutError(`Extension timed out (${action}, ${timeoutMs}ms)`));
-      }, timeoutMs);
-      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer, ws: target, action });
-      try {
-        target.send(JSON.stringify(req), (err) => {
-          if (err) fail(err);
-        });
-      } catch (e) {
-        fail(e);
-      }
+    return startRequest<T>(this.pending, {
+      id,
+      action,
+      ws: target,
+      frame: () => JSON.stringify(req),
+      timeoutMs,
+      timeoutMessage: `Extension timed out (${action}, ${timeoutMs}ms)`,
+      signal,
+      // Only the socket that got the command learns about the cancel.
+      onAbort: () => this.sendFrame(target, { type: "cancel", id }),
     });
   }
 
   close(): void {
-    for (const [, p] of this.pending) {
-      clearTimeout(p.timer);
+    for (const [id, p] of this.pending) {
+      takePending(this.pending, id);
       p.reject(new Error("Bridge closed"));
     }
     this.pending.clear();
+    this.relays.clear();
     for (const [, p] of this.peers) {
-      if (p.authTimer) clearTimeout(p.authTimer);
+      if (p.authTimer) {
+        clearTimeout(p.authTimer);
+        p.authTimer = null;
+      }
     }
     // Drop satellite/observer sockets promptly so they fail over instead
     // of lingering on a half-open connection.
@@ -1582,27 +2453,44 @@ export class BridgeClient implements IBridge {
   private lastPeers = -1;
   private lastStatus: Partial<BridgeStatus> | null = null;
   private lastDisabled: string[] | null = null;
+  private permsListeners = new Set<(disabled: string[] | null) => void>();
+  private lastEmittedPerms = "null";
+  /** The primary proved it holds the token and accepted ours (auth_ok after our auth_proof). */
   private authed = false;
+  /** Client auth of the current link while it runs: our nonce, the token it uses, the step. */
+  private linkAuth: { ws: WebSocket; token: string; nonce: string; stage: "challenge" | "proof"; timer: ReturnType<typeof setTimeout> } | null = null;
+  /** Consecutive links that ended without a verified primary; stretches the retry delay. */
+  private authFailures = 0;
+  private logThrottle = new Map<string, number>();
   private warnedLaunchPrefs = false;
-  private readonly extensionIds: string[] | undefined;
+  private warnedPairing = false;
+  /** Own options; a promotion to primary uses them too (pair, legacy, config dir...). */
+  private readonly opts: BridgeClientOptions;
+  private readonly env: Env;
+  private readonly timings: BridgeTimings;
+  private readonly log: LogFn;
+  private readonly startedAt = Date.now();
 
-  constructor(port: number, opts?: { extensionIds?: string[] }) {
+  constructor(port: number, opts?: BridgeClientOptions) {
     this.port = port;
-    this.extensionIds = opts?.extensionIds;
+    this.opts = { ...(opts ?? {}) };
+    this.env = this.opts.env ?? process.env;
+    this.timings = resolveTimings(this.opts.timings);
+    this.log = this.opts.log ?? defaultLog;
     // A failed first link is retried (failover / reconnect) for a bounded
     // time before ready() rejects (A8).
     this.readyDeadline = setTimeout(() => {
       this.readyDeadline = null;
       const why = this.lastError?.message ? `: ${this.lastError.message}` : "";
       this.settleReady(new Error(`Cannot reach or take over the primary bridge on :${port}${why}`));
-    }, SATELLITE_READY_DEADLINE_MS);
+    }, this.timings.satelliteReadyDeadlineMs);
     this.connect();
   }
 
   ready(): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       if (this.readySettled) {
-        if (this.primary || (this.ws && this.ws.readyState === WebSocket.OPEN)) resolve();
+        if (this.primary || this.linkOpen) resolve();
         else reject(this.lastError ?? new Error(`Satellite bridge to :${this.port} is not connected`));
         return;
       }
@@ -1613,12 +2501,17 @@ export class BridgeClient implements IBridge {
 
   get connected(): boolean {
     if (this.primary) return this.primary.connected;
-    return !!this.ws && this.ws.readyState === WebSocket.OPEN && this.extensionConnected;
+    return this.linkOpen && this.extensionConnected;
   }
 
   get mode(): "primary" | "satellite" {
     // A promoted satellite behaves as the primary for its agent.
     return this.primary ? "primary" : "satellite";
+  }
+
+  private dir(): string {
+    const d = this.opts.configDir?.trim();
+    return d ? ensureDir(path.resolve(d), this.log) : configDir(this.env);
   }
 
   status(): BridgeStatusInfo {
@@ -1632,7 +2525,15 @@ export class BridgeClient implements IBridge {
       trustedExtensionIds: s?.trustedExtensionIds,
       rejectedExtensionIds: s?.rejectedExtensionIds,
       tofuOpen: s?.tofuOpen,
-      configDir: s?.configDir ?? configDir(),
+      configDir: s?.configDir ?? this.dir(),
+      extensionVersion: s?.extensionVersion,
+      extensionProtocol: s?.extensionProtocol,
+      pairingOpen: s?.pairingOpen,
+      pairedInstalls: s?.pairedInstalls,
+      serverVersion: s?.serverVersion,
+      bridgeProtocol: s?.bridgeProtocol,
+      legacyExtensionAllowed: s?.legacyExtensionAllowed,
+      lastExtensionRefusal: s?.lastExtensionRefusal,
     };
   }
 
@@ -1641,9 +2542,31 @@ export class BridgeClient implements IBridge {
     return this.lastDisabled ? [...this.lastDisabled] : null;
   }
 
-  /** Raw link state (ignores extension status) — used internally for polling. */
+  onPermsChange(cb: (disabled: string[] | null) => void): () => void {
+    this.permsListeners.add(cb);
+    return () => {
+      this.permsListeners.delete(cb);
+    };
+  }
+
+  /** Tell subscribers about a changed snapshot (repeats of the same set are skipped). */
+  private emitPerms(): void {
+    const d = this.knownDisabled();
+    const key = permsKey(d);
+    if (key === this.lastEmittedPerms) return;
+    this.lastEmittedPerms = key;
+    for (const cb of [...this.permsListeners]) {
+      try {
+        cb(d ? [...d] : null);
+      } catch (e) {
+        this.log(`perms listener failed: ${errText(e)}`);
+      }
+    }
+  }
+
+  /** Authenticated link state (ignores extension status) — used internally for polling. */
   private get linkOpen(): boolean {
-    return !!this.ws && this.ws.readyState === WebSocket.OPEN;
+    return !!this.ws && this.ws.readyState === WebSocket.OPEN && this.authed;
   }
 
   private settleReady(err?: Error) {
@@ -1671,40 +2594,48 @@ export class BridgeClient implements IBridge {
     this.authed = false;
     ws.on("open", () => {
       if (this.ws !== ws) return;
-      console.error(`[bridge:${process.pid}] satellite connected to primary on :${this.port}`);
-      // Authenticate first (token re-read on every attempt: a new primary
-      // writes a new one). Frames are processed in order by the primary.
-      const token = readTokenFile(this.port);
-      if (token) {
-        try { ws.send(JSON.stringify({ type: "auth", token })); } catch {}
-      } else {
-        console.error(`[bridge:${process.pid}] no bridge token at ${tokenFile(this.port)}; the primary will refuse this satellite`);
+      this.log(`satellite link open on :${this.port}, authenticating the primary`);
+      // Mutual auth before anything else (token re-read on every attempt: a new primary writes a
+      // new one). The token itself never goes on the wire: whatever holds the port has to prove
+      // it knows the token before this satellite proves the same and sends commands.
+      const dir = this.dir();
+      const token = readTokenFile(dir, this.port);
+      if (!token) {
+        this.failAuth(
+          ws,
+          `no bridge token at ${tokenFile(dir, this.port)}, so the process on :${this.port} cannot be verified`,
+          "every browser-mcp server sharing this port needs the same config directory (BROWSER_MCP_HOME)"
+        );
+        return;
       }
-      // Fetch real extension status before marking ready so `connected`
-      // is accurate from the start.
-      this.refreshStatus().finally(() => {
-        if (this.ws !== ws || !this.linkOpen) return;
-        this.settleReady();
-        this.startStatusPoll();
-      });
+      const nonce = randomHex();
+      // A primary answers in one round trip; a silent peer is treated like a failed proof.
+      const timer = setTimeout(() => {
+        if (this.linkAuth?.ws === ws) this.failAuth(ws, `the process on :${this.port} did not answer authentication within ${this.timings.statusTimeoutMs}ms`);
+      }, this.timings.statusTimeoutMs);
+      this.linkAuth = { ws, token, nonce, stage: "challenge", timer };
+      try { ws.send(JSON.stringify({ type: "auth", v: 2, nonce })); } catch {}
     });
     ws.on("message", (raw) => {
       try {
         this.onLinkMessage(ws, rawToText(raw));
       } catch (e) {
-        console.error(`[bridge:${process.pid}] satellite: bad frame ignored: ${(e as Error)?.message ?? e}`);
+        this.log(`satellite: bad frame ignored: ${errText(e)}`);
       }
     });
     ws.on("close", (code: number) => {
-      const why =
-        code === 4001
-          ? `Primary bridge on :${this.port} refused authentication (stale token?)`
-          : `Primary bridge on :${this.port} closed`;
+      if (this.ws !== ws) return;
+      let why = `Primary bridge on :${this.port} closed`;
+      if (code === 4001) {
+        // A stale token, or a primary from before the v2 client auth: it only knows the legacy
+        // raw-token frame, which this satellite never sends. Retry with backoff.
+        if (!this.authed) this.authFailures++;
+        why = `Primary bridge on :${this.port} refused authentication (stale token, or a primary of an older browser-mcp release that needs a restart)`;
+      }
       this.dropLink(ws, new Error(why));
     });
     ws.on("error", (e) => {
-      const msg = (e as Error)?.message ?? String(e);
-      console.error(`[bridge:${process.pid}] satellite ws error: ${msg}`);
+      this.log(`satellite ws error: ${errText(e)}`);
       try { ws.terminate(); } catch {}
       this.dropLink(ws, e as Error);
     });
@@ -1716,25 +2647,87 @@ export class BridgeClient implements IBridge {
     try {
       msg = JSON.parse(text);
     } catch {
+      msg = null;
+    }
+    if (!this.authed) {
+      // Before auth_ok only the auth frames of the current step count; events or replies from
+      // a peer that has not proved the token are never applied.
+      this.onLinkAuth(ws, isPlainObject(msg) ? msg : {});
       return;
     }
     if (!isPlainObject(msg)) return;
-    if (msg.type === "auth_ok") {
-      this.authed = true;
-      return;
-    }
+    if (msg.type === "auth_ok") return;
     if (msg.type === "event") {
       this.onEvent(msg);
       return;
     }
     if (typeof msg.id !== "string") return;
-    const p = this.pending.get(msg.id);
+    const p = takePending(this.pending, msg.id);
     if (!p) return;
-    this.pending.delete(msg.id);
-    clearTimeout(p.timer);
     const res = msg as unknown as BridgeResponse;
     if (res.ok) p.resolve(res.result);
     else p.reject(new Error((typeof res.error === "string" && res.error) || "primary bridge error"));
+  }
+
+  /** The client auth steps of a link (see the header comment): verify the primary, then prove the token. */
+  private onLinkAuth(ws: WebSocket, msg: Record<string, unknown>): void {
+    const a = this.linkAuth;
+    if (!a || a.ws !== ws) {
+      this.failAuth(ws, `the process on :${this.port} sent a frame before authentication started`);
+      return;
+    }
+    if (a.stage === "challenge" && msg.type === "auth_challenge") {
+      const np = typeof msg.nonce === "string" && HEX64_RE.test(msg.nonce) ? msg.nonce : null;
+      if (np && proofMatches(clientAuthProof(a.token, "server", this.port, a.nonce, np), msg.proof)) {
+        a.stage = "proof";
+        try { ws.send(JSON.stringify({ type: "auth_proof", proof: clientAuthProof(a.token, "client", this.port, np, a.nonce) })); } catch {}
+        return;
+      }
+      this.failAuth(ws, `the process on :${this.port} could not prove it holds the bridge token (${tokenFile(this.dir(), this.port)})`);
+      return;
+    }
+    if (a.stage === "proof" && msg.type === "auth_ok") {
+      clearTimeout(a.timer);
+      this.linkAuth = null;
+      this.authed = true;
+      this.authFailures = 0;
+      // Fetch real extension status before marking ready so `connected`
+      // is accurate from the start.
+      this.refreshStatus().finally(() => {
+        if (this.ws !== ws || !this.linkOpen) return;
+        this.settleReady();
+        this.startStatusPoll();
+      });
+      return;
+    }
+    this.failAuth(
+      ws,
+      a.stage === "challenge"
+        ? `the process on :${this.port} did not prove it holds the bridge token (${tokenFile(this.dir(), this.port)})`
+        : `the process on :${this.port} sent an unexpected frame instead of auth_ok`
+    );
+  }
+
+  /**
+   * The peer on the port is not a verified primary (or the token is missing): close the link
+   * without sending it anything more, warn (throttled per hint), and retry with a growing delay.
+   */
+  private failAuth(
+    ws: WebSocket,
+    why: string,
+    hint = "another program may hold the port, or the token file is stale"
+  ): void {
+    if (this.ws !== ws) return;
+    this.authFailures++;
+    logThrottledTo(
+      this.logThrottle,
+      this.log,
+      `primary-unverified:${hint}`,
+      `WARNING: satellite not linked: ${why}; it was sent no token and no command (${hint}). Retrying with backoff.`,
+      60000
+    );
+    try { ws.terminate(); } catch {}
+    this.dropLink(ws, new Error(`Primary bridge on :${this.port} failed authentication: ${why}`), true);
   }
 
   /** Events broadcast by the primary (A9). */
@@ -1745,6 +2738,7 @@ export class BridgeClient implements IBridge {
       if (d) {
         this.lastDisabled = d;
         this.enforceEventPerms();
+        this.emitPerms();
       }
       return;
     }
@@ -1769,10 +2763,30 @@ export class BridgeClient implements IBridge {
     this.extensionConnected = !!s.connected;
     if (typeof s.peers === "number") this.lastPeers = s.peers;
     this.lastStatus = s as Partial<BridgeStatus>;
+    this.warnIgnoredPairing(s);
     if ("disabled" in s) {
       this.lastDisabled = Array.isArray(s.disabled) ? parseDisabled({ disabled: s.disabled }) : null;
       this.enforceEventPerms();
+      this.emitPerms();
     }
+  }
+
+  /**
+   * --pair / --allow-legacy-extension of a satellite only matter once it is
+   * promoted; the primary decides. Say so once instead of failing silently.
+   */
+  private warnIgnoredPairing(s: Record<string, unknown>): void {
+    if (this.warnedPairing) return;
+    const pair = this.opts.pair ?? envFlag(this.env.BROWSER_MCP_PAIR);
+    const legacy = this.opts.allowLegacyExtension ?? envFlag(this.env.BROWSER_MCP_ALLOW_LEGACY_EXTENSION);
+    const ignored: string[] = [];
+    if (pair && s.pairingOpen === false) ignored.push("--pair");
+    if (legacy && s.legacyExtensionAllowed === false) ignored.push("--allow-legacy-extension");
+    if (!ignored.length) return;
+    this.warnedPairing = true;
+    this.log(
+      `${ignored.join(" and ")} has no effect here: the primary bridge on :${this.port} (another browser-mcp process) decides; stop the other servers or start that one with the option`
+    );
   }
 
   /**
@@ -1782,7 +2796,8 @@ export class BridgeClient implements IBridge {
   private refreshStatus(): Promise<void> {
     if (this.statusInflight) return this.statusInflight;
     const ws = this.ws;
-    const p = this.sendRaw<BridgeStatus>("__bridge_status", {}, undefined, STATUS_TIMEOUT_MS, STATUS_TIMEOUT_MS)
+    const t = this.timings.statusTimeoutMs;
+    const p = this.sendRaw<BridgeStatus>("__bridge_status", {}, undefined, t, t)
       .then(
         (s) => {
           this.statusFails = 0;
@@ -1792,8 +2807,8 @@ export class BridgeClient implements IBridge {
           if ((e as { code?: string })?.code !== "ETIMEDOUT" || this.ws !== ws || !ws) return;
           this.statusFails++;
           this.extensionConnected = false;
-          if (this.statusFails >= STATUS_FAILS_BEFORE_FAILOVER) {
-            console.error(`[bridge:${process.pid}] primary on :${this.port} stopped answering (${this.statusFails} status timeouts), failing over`);
+          if (this.statusFails >= this.timings.statusFailsBeforeFailover) {
+            this.log(`primary on :${this.port} stopped answering (${this.statusFails} status timeouts), failing over`);
             try { ws.terminate(); } catch {}
             this.dropLink(ws, new Error(`Primary bridge on :${this.port} is unresponsive`));
           }
@@ -1806,17 +2821,19 @@ export class BridgeClient implements IBridge {
     return p;
   }
 
-  private dropLink(ws: WebSocket, err: Error): void {
+  private dropLink(ws: WebSocket, err: Error, quiet = false): void {
     if (this.ws !== ws) return;
     this.ws = null;
     this.authed = false;
+    this.clearLinkAuth();
     this.extensionConnected = false;
     this.statusFails = 0;
     this.lastError = err;
-    console.error(`[bridge:${process.pid}] satellite link down on :${this.port} (${err.message}), failing over`);
+    // failAuth already warned (throttled): a squatter on the port must not flood the log.
+    if (!quiet) this.log(`satellite link down on :${this.port} (${err.message}), failing over`);
     this.stopStatusPoll();
-    for (const [, p] of this.pending) {
-      clearTimeout(p.timer);
+    for (const [id, p] of this.pending) {
+      takePending(this.pending, id);
       p.reject(new Error("Primary bridge disconnected"));
     }
     this.pending.clear();
@@ -1825,11 +2842,20 @@ export class BridgeClient implements IBridge {
     this.scheduleFailover();
   }
 
+  private clearLinkAuth(): void {
+    if (this.linkAuth) clearTimeout(this.linkAuth.timer);
+    this.linkAuth = null;
+  }
+
   private scheduleFailover() {
     if (this.closed || this.primary || this.reconnectTimer) return;
     // Jittered delay: N satellites losing the primary at once must not all
-    // bind() in the same millisecond (thundering herd). Spread 1.2–3.2s.
-    const delay = 1200 + Math.random() * 2000;
+    // bind() in the same millisecond (thundering herd). After links that did
+    // not authenticate, back off further (doubling, capped).
+    const backoff = this.authFailures
+      ? Math.min(AUTH_BACKOFF_MAX_MS, Math.max(this.timings.failoverDelayMs, 100) * 2 ** Math.min(this.authFailures - 1, 16))
+      : 0;
+    const delay = this.timings.failoverDelayMs + Math.random() * this.timings.failoverJitterMs + backoff;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       this.attemptPrimary();
@@ -1860,17 +2886,19 @@ export class BridgeClient implements IBridge {
     if (!this.selfHealthy()) {
       // Our own agent is gone: do not squat on the shared port. Exit so the
       // OS/manager can reap us; a healthy sibling will take over if needed.
-      console.error(`[bridge:${process.pid}] satellite unhealthy, exiting instead of takeover on :${this.port}`);
+      this.log(`satellite unhealthy, exiting instead of takeover on :${this.port}`);
       try { this.close(); } catch {}
       setTimeout(() => process.exit(0), 100).unref?.();
       return;
     }
-    console.error(`[bridge:${process.pid}] satellite attempting takeover on :${this.port}`);
+    this.log(`satellite attempting takeover on :${this.port}`);
     let candidate: ExtensionBridge;
     try {
-      candidate = new ExtensionBridge(this.port, { exitOnAddrInUse: false, extensionIds: this.extensionIds });
+      // The promoted primary runs with this process's own options (pair window
+      // counted from this process's start, legacy switch, config dir...).
+      candidate = new ExtensionBridge(this.port, { ...this.opts, exitOnAddrInUse: false, pairSince: this.startedAt });
     } catch (e) {
-      console.error(`[bridge:${process.pid}] takeover bind threw, rejoining as client`, e);
+      this.log(`takeover bind threw, rejoining as client: ${errText(e)}`);
       this.lastError = e as Error;
       if (!this.closed) this.connect();
       return;
@@ -1882,17 +2910,22 @@ export class BridgeClient implements IBridge {
           return;
         }
         // Carry over what this satellite knew (permission snapshot, buffered events).
+        candidate.onPermsChange(() => this.emitPerms());
         candidate.adoptState({ disabled: this.lastDisabled, consoleEvents: this.localConsole, networkEvents: this.localNetwork });
         this.primary = candidate;
-        console.error(`[bridge:${process.pid}] satellite promoted to primary on :${this.port}`);
+        this.log(`satellite promoted to primary on :${this.port}`);
         try { this.ws?.close(); } catch {}
         this.ws = null;
+        this.authed = false;
+        this.clearLinkAuth();
+        this.authFailures = 0;
         this.stopStatusPoll();
         this.settleReady();
+        this.emitPerms();
       },
       (e) => {
         const code = (e as { code?: string })?.code;
-        console.error(`[bridge:${process.pid}] takeover failed (${(e as Error)?.message}), rejoining as client`);
+        this.log(`takeover failed (${errText(e)}), rejoining as client`);
         if (code !== "EADDRINUSE") this.lastError = e as Error;
         try { candidate.close(); } catch {}
         if (this.closed) return;
@@ -1907,7 +2940,7 @@ export class BridgeClient implements IBridge {
       if (this.closed || !this.linkOpen) return;
       void this.refreshStatus();
     };
-    this.statusTimer = setInterval(poll, STATUS_POLL_MS);
+    this.statusTimer = setInterval(poll, this.timings.statusPollMs);
   }
 
   private stopStatusPoll() {
@@ -1919,10 +2952,10 @@ export class BridgeClient implements IBridge {
 
   /** This satellite's own launch settings, forwarded to the primary (A10). */
   private launchPrefs(): LaunchPrefs {
-    const prefs: LaunchPrefs = { auto: process.env.BROWSER_AUTO_LAUNCH !== "0" };
-    const name = (process.env.BROWSER ?? "").trim();
-    const bp = (process.env.BROWSER_PATH ?? "").trim();
-    const cp = (process.env.CHROME_PATH ?? "").trim();
+    const prefs: LaunchPrefs = { auto: this.opts.autoLaunch ?? this.env.BROWSER_AUTO_LAUNCH !== "0" };
+    const name = (this.env.BROWSER ?? "").trim();
+    const bp = (this.env.BROWSER_PATH ?? "").trim();
+    const cp = (this.env.CHROME_PATH ?? "").trim();
     const browser =
       (bp ? browserIdFromBin(bp) : null) ??
       (name ? normalizeBrowserId(name) ?? browserIdFromBin(name) : null) ??
@@ -1930,20 +2963,18 @@ export class BridgeClient implements IBridge {
     if (browser) prefs.browser = browser;
     if (!this.warnedLaunchPrefs && (bp || cp || (name && !normalizeBrowserId(name)))) {
       this.warnedLaunchPrefs = true;
-      console.error(
-        `[bridge:${process.pid}] satellite: browser binary paths are not forwarded; the primary launches its own ${browser ?? "default"} browser binary`
-      );
+      this.log(`satellite: browser binary paths are not forwarded; the primary launches its own ${browser ?? "default"} browser binary`);
     }
     return prefs;
   }
 
-  send<T = unknown>(action: string, payload?: unknown, tabId?: number, timeoutMs = 30000): Promise<T> {
-    if (this.primary) return this.primary.send<T>(action, payload, tabId, timeoutMs);
+  send<T = unknown>(action: string, payload?: unknown, tabId?: number, timeoutMs = 30000, opts?: SendOptions): Promise<T> {
+    if (this.primary) return this.primary.send<T>(action, payload, tabId, timeoutMs, opts);
     const prefs = this.launchPrefs();
     // The primary may first wait for a reconnecting extension and auto-launch
     // a browser before running the command: budget for it locally (A5).
-    const extra = this.extensionConnected ? 0 : RECONNECT_GRACE_MS + (prefs.auto ? envLaunchTimeoutMs() : 0);
-    return this.sendRaw<T>(action, payload, tabId, timeoutMs, timeoutMs + 5000 + extra, prefs);
+    const extra = this.extensionConnected ? 0 : this.timings.reconnectGraceMs + (prefs.auto ? envLaunchTimeoutMs(this.env) : 0);
+    return this.sendRaw<T>(action, payload, tabId, timeoutMs, timeoutMs + 5000 + extra, prefs, opts?.signal);
   }
 
   /**
@@ -1956,34 +2987,30 @@ export class BridgeClient implements IBridge {
     tabId: number | undefined,
     relayTimeoutMs: number,
     localTimeoutMs: number,
-    launch?: LaunchPrefs
+    launch?: LaunchPrefs,
+    signal?: AbortSignal
   ): Promise<T> {
+    if (signal?.aborted) return Promise.reject(abortError());
     const ws = this.ws;
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
+    if (!ws || !this.linkOpen) {
       return Promise.reject(new Error(`Primary bridge not connected (port ${this.port}); reconnecting, retry shortly.`));
     }
     const id = `sat-${process.pid}-${crypto.randomUUID()}`;
     const req: BridgeRequest = { id, action, tabId, payload, timeoutMs: relayTimeoutMs };
     if (launch) req.launch = launch;
-    return new Promise<T>((resolve, reject) => {
-      const fail = (err: unknown) => {
-        if (!this.pending.has(id)) return;
-        this.pending.delete(id);
-        clearTimeout(timer);
-        reject(err instanceof Error ? err : new Error(String(err)));
-      };
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(timeoutError(`Primary bridge timed out (${action}, ${localTimeoutMs}ms)`));
-      }, localTimeoutMs);
-      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer, ws, action });
-      try {
-        ws.send(JSON.stringify(req), (err) => {
-          if (err) fail(err);
-        });
-      } catch (e) {
-        fail(e);
-      }
+    return startRequest<T>(this.pending, {
+      id,
+      action,
+      ws,
+      frame: () => JSON.stringify(req),
+      timeoutMs: localTimeoutMs,
+      timeoutMessage: `Primary bridge timed out (${action}, ${localTimeoutMs}ms)`,
+      signal,
+      // The primary maps this id to its own command id and tells the extension.
+      onAbort: () => {
+        if (ws.readyState !== WebSocket.OPEN) return;
+        try { ws.send(JSON.stringify({ type: "cancel", id })); } catch {}
+      },
     });
   }
 
@@ -1991,7 +3018,7 @@ export class BridgeClient implements IBridge {
     if (this.primary) return this.primary.launchBrowser(timeoutMs);
     // Use this satellite's launch timeout and browser choice, and wait locally
     // a bit longer than the primary does (A5/B9).
-    const wait = clampTimeout(timeoutMs ?? envLaunchTimeoutMs());
+    const wait = clampTimeout(timeoutMs ?? envLaunchTimeoutMs(this.env));
     const prefs = this.launchPrefs();
     return this.sendRaw("__launchBrowser", { timeoutMs: wait, browser: prefs.browser }, undefined, wait, wait + 15000);
   }
@@ -2005,6 +3032,7 @@ export class BridgeClient implements IBridge {
 
   close(): void {
     this.closed = true;
+    this.clearLinkAuth();
     this.stopStatusPoll();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
@@ -2014,8 +3042,8 @@ export class BridgeClient implements IBridge {
       clearTimeout(this.readyDeadline);
       this.readyDeadline = null;
     }
-    for (const [, p] of this.pending) {
-      clearTimeout(p.timer);
+    for (const [id, p] of this.pending) {
+      takePending(this.pending, id);
       p.reject(new Error("Bridge closed"));
     }
     this.pending.clear();
