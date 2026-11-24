@@ -51,6 +51,8 @@
     "test:integration": "bun test ./test/integration",
     "build:binary": "bun scripts/build-binaries.ts",
     "build:binaries": "bun scripts/build-binaries.ts --all",
+    "docs:tools": "bun scripts/gen-tools-doc.ts",
+    "docs:tools:check": "bun scripts/gen-tools-doc.ts --check",
     "prepack": "bun scripts/pack-assets.ts copy",
     "postpack": "bun scripts/pack-assets.ts clean"
   },
