@@ -1,0 +1,15 @@
+// Type-checks the CI scripts with mcp-server's TypeScript and Bun types (Bun runs them
+// without checking types). From mcp-server: bunx tsc -p ../scripts/ci/tsconfig.json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": ["bun"],
+    "typeRoots": ["../../mcp-server/node_modules/@types"]
+  },
+  "include": ["*.ts"]
+}
