@@ -403,7 +403,9 @@ function baseEnv(): Record<string, string> {
 
 /** A temporary folder with the given files; removed by the returned cleanup. */
 function tempDir(prefix: string, files: Record<string, string> = {}): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  // The canonical path, as Bun reports it for the working directory and import.meta.dir:
+  // macOS temp folders sit behind /var -> /private/var, and a Windows TEMP may use 8.3 names.
+  const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
   for (const [name, text] of Object.entries(files)) {
     fs.mkdirSync(path.dirname(path.join(dir, name)), { recursive: true });
     fs.writeFileSync(path.join(dir, name), text);
