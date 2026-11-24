@@ -29,7 +29,11 @@
   },
   "statusRejected": {
     "message": "거부됨",
-    "description": "Status badge when the MCP server refused the connection"
+    "description": "Status badge when the MCP server does not trust this extension's id"
+  },
+  "statusDisconnected": {
+    "message": "연결 끊김",
+    "description": "Status badge when the MCP server closed the connection for another reason (for example a handshake timeout)"
   },
   "statusPairedTitle": {
     "message": "MCP 서버와 페어링됨",
@@ -39,41 +43,25 @@
     "message": "연결됨, MCP 서버 핸드셰이크 대기 중",
     "description": "Status badge tooltip while connected but the server handshake is pending"
   },
-  "activeTabTag": {
-    "message": "🌐 탭",
-    "description": "Active tab prefix"
-  },
   "tabPermissions": {
     "message": "권한",
     "description": "Navigation button for permissions"
   },
   "tabRecentCommands": {
-    "message": "최근 명령",
-    "description": "Navigation button for recent commands"
+    "message": "기록",
+    "description": "Navigation tab for the command history pane"
   },
   "searchPlaceholder": {
     "message": "권한 검색…",
     "description": "Search input placeholder"
-  },
-  "btnAll": {
-    "message": "전체",
-    "description": "Enable all button"
-  },
-  "btnNone": {
-    "message": "해제",
-    "description": "Disable all button"
   },
   "noResults": {
     "message": "검색 결과가 없습니다",
     "description": "Search no results text"
   },
   "permsAgentNote": {
-    "message": "AI 에이전트는 권한을 끌 수만 있습니다. 다시 켜는 것은 여기에서만 가능합니다.",
+    "message": "에이전트는 권한을 끌 수만 있습니다.",
     "description": "Hint under the permission search: the agent can only disable permissions"
-  },
-  "executionHistory": {
-    "message": "실행 기록",
-    "description": "History section title"
   },
   "btnClear": {
     "message": "지우기",
@@ -116,24 +104,8 @@
     "description": "Language selector tooltip"
   },
   "langAuto": {
-    "message": "🌐 자동",
-    "description": "Auto language label"
-  },
-  "trustRejectedTitle": {
-    "message": "MCP 서버가 이 확장 프로그램을 거부했습니다",
-    "description": "Notice title when the MCP server rejected this extension id (close code 4003)"
-  },
-  "trustRejectedBody": {
-    "message": "이 확장 프로그램 ID가 서버의 신뢰 목록에 없습니다. 다음 중 하나를 수행한 후 MCP 서버를 다시 시작하세요:",
-    "description": "Notice text explaining how to make the MCP server trust this extension"
-  },
-  "trustOptEnv": {
-    "message": "MCP 서버에 다음 환경 변수를 설정하세요:",
-    "description": "Notice option: environment variable to trust this extension id"
-  },
-  "trustOptReset": {
-    "message": "또는 이 파일을 삭제하면 다음에 연결되는 확장 프로그램과 다시 페어링됩니다:",
-    "description": "Notice option: delete the trusted-extensions file to pair again"
+    "message": "자동",
+    "description": "Language option that follows the browser's language (no emoji or icon)"
   },
   "extensionIdLabel": {
     "message": "확장 프로그램 ID",
@@ -147,16 +119,12 @@
     "message": "복사됨",
     "description": "Copy button feedback after copying"
   },
-  "serverClosedTitle": {
-    "message": "MCP 서버가 연결을 종료했습니다",
-    "description": "Notice title when the MCP server closed the connection with another code"
-  },
   "statusActionNeeded": {
-    "message": "조치 필요",
-    "description": "Status badge when the user must decide whether to accept a new pairing offer"
+    "message": "페어링 필요",
+    "description": "Status badge when this browser has to pair with the MCP server again (new pairing offer, rejected pairing proof or pairing closed)"
   },
   "statusUntrustedServer": {
-    "message": "확인되지 않은 서버",
+    "message": "알 수 없는 서버",
     "description": "Status badge when the program on the port could not prove it is the paired MCP server"
   },
   "statusUpdateNeeded": {
@@ -166,10 +134,6 @@
   "pairInfoHandshake": {
     "message": "MCP 서버 확인 중…",
     "description": "Pairing status line while the server is being verified"
-  },
-  "pairInfoHasKey": {
-    "message": "이 브라우저에 페어링 키가 저장되어 있습니다",
-    "description": "Pairing status line when not connected but a pairing key is stored"
   },
   "pairInfoNoKey": {
     "message": "아직 페어링되지 않음",
@@ -187,21 +151,9 @@
     "message": "페어링 해제",
     "description": "Small action that deletes the stored pairing key"
   },
-  "btnForgetConfirm": {
-    "message": "한 번 더 클릭하여 해제",
-    "description": "Forget-pairing action after the first click: asks for a confirming second click"
-  },
   "forgetPairingTitle": {
     "message": "이 브라우저의 페어링 키를 삭제하고 다시 연결합니다. 다음에 페어링을 제안하는 MCP 서버가 자동으로 신뢰됩니다.",
     "description": "Tooltip of the forget-pairing action"
-  },
-  "pairRepairTitle": {
-    "message": "MCP 서버가 다시 페어링을 요청합니다",
-    "description": "Notice title when the server offered a new pairing and the extension declined it"
-  },
-  "pairRepairBody": {
-    "message": "이 포트의 서버가 새 페어링 키를 제안했지만, 이 브라우저는 이미 다른 키로 페어링되어 있습니다. MCP 서버를 직접 초기화하거나 다시 설치한 경우에만 '다시 페어링'을 클릭하세요. 그렇지 않으면 다른 프로그램이 서버를 사칭하고 있을 수 있습니다.",
-    "description": "Notice text for the re-pair offer; must name the Re-pair button (btnRepair)"
   },
   "btnRepair": {
     "message": "다시 페어링",
@@ -214,50 +166,6 @@
   "repairTitle": {
     "message": "서버의 다음 페어링 제안을 (2분 동안) 수락하고 지금 다시 연결합니다",
     "description": "Tooltip of the Re-pair button"
-  },
-  "pairClosedTitle": {
-    "message": "MCP 서버에서 페어링이 닫혀 있습니다",
-    "description": "Notice title when the server refuses new pairings (close code 4004)"
-  },
-  "pairClosedBody": {
-    "message": "서버가 이미 다른 설치와 페어링되어 있습니다. 서버를 --pair (또는 BROWSER_MCP_PAIR=1) 옵션으로 한 번 시작하거나, 서버 설정 디렉터리의 extension-keys.json을 삭제하세요.",
-    "description": "Notice text for pairing-closed; keep --pair, BROWSER_MCP_PAIR=1 and extension-keys.json unchanged"
-  },
-  "pairKeysFileLabel": {
-    "message": "페어링 파일(서버 기본 설정 디렉터리):",
-    "description": "Label above the default path of the server pairing file"
-  },
-  "serverAuthFailedTitle": {
-    "message": "서버가 신원을 증명하지 못했습니다",
-    "description": "Notice title when the server failed the pairing challenge (close code 4101)"
-  },
-  "serverAuthFailedBody": {
-    "message": "이 포트의 프로그램에 이 브라우저의 페어링 키가 없으므로 명령이 실행되지 않았습니다. 서버의 페어링 데이터를 초기화했다면 서버 설정 디렉터리의 extension-keys.json을 삭제하고 서버를 다시 시작한 뒤, 요청이 표시되면 여기에서 '다시 페어링'을 클릭하세요. 그렇지 않으면 다른 프로그램이 이 포트에서 대기 중일 수 있습니다.",
-    "description": "Notice text for server-auth-failed; keep extension-keys.json unchanged and name the Re-pair button"
-  },
-  "authFailedTitle": {
-    "message": "MCP 서버가 이 브라우저의 페어링 증명을 거부했습니다",
-    "description": "Notice title when the server rejected the extension proof (close code 4005)"
-  },
-  "authFailedBody": {
-    "message": "서버에 이 브라우저용 다른 페어링 키가 있습니다. 서버 설정 디렉터리의 extension-keys.json을 삭제하고 서버를 다시 시작한 뒤, 요청이 표시되면 여기에서 '다시 페어링'을 클릭하세요.",
-    "description": "Notice text for auth-failed; keep extension-keys.json unchanged and name the Re-pair button"
-  },
-  "protocolMismatchTitle": {
-    "message": "확장 프로그램과 MCP 서버 버전이 일치하지 않습니다",
-    "description": "Notice title when the bridge protocol versions differ"
-  },
-  "protocolUpdateServer": {
-    "message": "MCP 서버가 이 확장 프로그램보다 오래된 버전입니다. MCP 서버를 확장 프로그램과 같은 릴리스로 업데이트한 뒤 다시 시작하세요.",
-    "description": "Protocol mismatch advice: the server is outdated"
-  },
-  "protocolUpdateExtension": {
-    "message": "이 확장 프로그램이 MCP 서버보다 오래된 버전입니다. 확장 프로그램을 서버와 같은 릴리스로 업데이트한 뒤 다시 로드하세요.",
-    "description": "Protocol mismatch advice: the extension is outdated"
-  },
-  "protocolUpdateBoth": {
-    "message": "확장 프로그램과 MCP 서버가 서로 다른 프로토콜 버전을 사용합니다. 둘 다 같은 릴리스로 업데이트하세요.",
-    "description": "Protocol mismatch advice when the outdated side is unknown"
   },
   "cat_tabs": {
     "message": "탭 및 창",
@@ -342,5 +250,297 @@
   "cat_performance": {
     "message": "성능",
     "description": "Category: Performance"
+  },
+  "menuTitle": {
+    "message": "더보기",
+    "description": "Accessible name and tooltip of the header button (⋯) that opens the settings menu"
+  },
+  "menuExtension": {
+    "message": "확장 프로그램",
+    "description": "Settings menu section: this extension's version and ID"
+  },
+  "menuPort": {
+    "message": "브리지 포트",
+    "description": "Settings menu section: the local port the extension uses to reach the MCP server"
+  },
+  "menuLanguage": {
+    "message": "언어",
+    "description": "Settings menu section: the popup language"
+  },
+  "menuPairing": {
+    "message": "페어링",
+    "description": "Settings menu section: re-pair with or forget the MCP server pairing"
+  },
+  "agentTabsNone": {
+    "message": "에이전트 탭 없음",
+    "description": "Status line under the header: the agent works in no tab (lower case, it follows a separator)"
+  },
+  "agentTabsOne": {
+    "message": "에이전트 탭 1개",
+    "description": "Status line under the header: the agent works in one tab"
+  },
+  "agentTabsMany": {
+    "message": "에이전트 탭 {n}개",
+    "description": "Status line under the header: number of tabs the agent works in. Keep {n} unchanged: it is replaced by the number (2 or more)"
+  },
+  "agentTabsTitle": {
+    "message": "에이전트가 작업 중인 탭",
+    "description": "Heading of the list of tabs the agent works in (click a tab to switch to it)"
+  },
+  "activityNow": {
+    "message": "실행 중:",
+    "description": "Live activity strip: label before the command the agent is running right now. Include the colon, with your language's spacing (French: \"En cours :\")"
+  },
+  "activityMore": {
+    "message": "외 {n}개",
+    "description": "Live activity strip: how many other commands are running at the same time. Keep {n} unchanged: it is replaced by the number"
+  },
+  "profileRead": {
+    "message": "읽기",
+    "description": "Permission profile (short button label): read-only access"
+  },
+  "profileReadDesc": {
+    "message": "페이지 탐색 및 읽기, 스크린샷 캡처만 합니다. 클릭이나 입력은 하지 않습니다.",
+    "description": "Description of the Read permission profile"
+  },
+  "profileStandard": {
+    "message": "표준",
+    "description": "Permission profile (short button label): everything except high-risk access"
+  },
+  "profileStandardDesc": {
+    "message": "클릭, 입력, 네트워크, 개발자 도구도 사용합니다. 고위험 접근은 없습니다.",
+    "description": "Description of the Standard permission profile"
+  },
+  "profileFull": {
+    "message": "전체",
+    "description": "Permission profile (short button label): every permission on"
+  },
+  "profileFullDesc": {
+    "message": "코드 실행, 쿠키, 저장소, 기록을 포함한 모든 권한입니다.",
+    "description": "Description of the Full permission profile"
+  },
+  "profileCustom": {
+    "message": "사용자 지정",
+    "description": "Permission profile (short button label): shown when the switches match no profile; not clickable"
+  },
+  "profileCustomDesc": {
+    "message": "직접 선택한 설정입니다.",
+    "description": "Description shown when the permission switches match no profile"
+  },
+  "riskHigh": {
+    "message": "고위험",
+    "description": "Small badge on permission categories that can reach private data or run code"
+  },
+  "confirmHighRiskTitle": {
+    "message": "고위험 접근을 허용할까요?",
+    "description": "Title of the confirmation dialog shown before switching on high-risk permissions"
+  },
+  "confirmHighRiskBody": {
+    "message": "에이전트가 다음을 사용할 수 있게 됩니다: {cats}. 이 권한으로 로그인 정보, 쿠키, 저장소, 클립보드, 기록 같은 개인 데이터를 읽거나 변경하거나, 페이지에서 임의의 코드를 실행할 수 있습니다.",
+    "description": "Body of the high-risk confirmation dialog. Keep {cats} unchanged: it is replaced by a comma-separated list of permission category names"
+  },
+  "confirmAllow": {
+    "message": "허용",
+    "description": "Confirmation dialog button that switches the high-risk permissions on"
+  },
+  "confirmCancel": {
+    "message": "취소",
+    "description": "Confirmation dialog button that closes the dialog without changing anything"
+  },
+  "confirmForgetTitle": {
+    "message": "페어링을 해제할까요?",
+    "description": "Title of the confirmation dialog shown before deleting the pairing key"
+  },
+  "confirmForgetBody": {
+    "message": "이 브라우저의 페어링 키가 삭제됩니다. 다시 연결하려면 서버를 --pair 옵션으로 한 번 시작하세요.",
+    "description": "Body of the forget-pairing confirmation dialog; keep --pair unchanged"
+  },
+  "agentDisabledBadge": {
+    "message": "에이전트가 끔",
+    "description": "Small badge next to a permission the AI agent switched off itself"
+  },
+  "agentDisabledHint": {
+    "message": "에이전트가 이 권한을 껐습니다. 다시 켜는 것은 사용자만 할 수 있습니다.",
+    "description": "Tooltip of the off-by-agent badge"
+  },
+  "stopAll": {
+    "message": "에이전트 중지",
+    "description": "Footer button that switches every permission off and cancels running commands"
+  },
+  "stopAllHint": {
+    "message": "모든 권한을 끄고 실행 중인 명령을 취소합니다",
+    "description": "Tooltip of the Stop agent button"
+  },
+  "stopAllDone": {
+    "message": "모두 꺼졌습니다",
+    "description": "Stop agent button label for a moment after it switched everything off"
+  },
+  "historyFilterAll": {
+    "message": "전체",
+    "description": "History filter chip: show every command"
+  },
+  "historyFilterErrors": {
+    "message": "오류",
+    "description": "History filter chip: show only failed commands"
+  },
+  "historyNoErrors": {
+    "message": "실패한 명령이 없습니다",
+    "description": "History list text when the Errors filter matches nothing"
+  },
+  "historyUnknownSite": {
+    "message": "페이지 없음",
+    "description": "History group heading for commands that did not act on a web page"
+  },
+  "catDesc_tabs": {
+    "message": "탭과 창 열기, 전환, 이동, 닫기",
+    "description": "One-line description of the Tabs & Windows permission category"
+  },
+  "catDesc_read": {
+    "message": "페이지 텍스트, HTML, 구조 읽기",
+    "description": "One-line description of the Page: Read permission category"
+  },
+  "catDesc_interact": {
+    "message": "클릭, 입력, 양식 작성, 파일 업로드",
+    "description": "One-line description of the Page: Interact permission category"
+  },
+  "catDesc_media": {
+    "message": "스크린샷, PDF, 탭 오디오",
+    "description": "One-line description of the Media permission category"
+  },
+  "catDesc_console": {
+    "message": "페이지 콘솔 읽기",
+    "description": "One-line description of the Console permission category"
+  },
+  "catDesc_network": {
+    "message": "요청과 응답 확인, 속도 제한, 헤더 추가",
+    "description": "One-line description of the Network: Observe permission category"
+  },
+  "catDesc_mock": {
+    "message": "네트워크 응답 차단 또는 위조",
+    "description": "One-line description of the Network: Intercept permission category"
+  },
+  "catDesc_downloads": {
+    "message": "다운로드 관리",
+    "description": "One-line description of the Downloads permission category"
+  },
+  "catDesc_bookmarks": {
+    "message": "북마크 검색, 추가, 삭제",
+    "description": "One-line description of the Bookmarks permission category"
+  },
+  "catDesc_cookies": {
+    "message": "로그인 정보를 포함한 쿠키 읽기 및 변경",
+    "description": "One-line description of the Cookies permission category"
+  },
+  "catDesc_storage": {
+    "message": "사이트 저장소 및 IndexedDB 읽기 및 변경",
+    "description": "One-line description of the Storage permission category"
+  },
+  "catDesc_sessions": {
+    "message": "닫은 탭 복원, 로그인 상태 저장 및 불러오기",
+    "description": "One-line description of the Sessions & State permission category"
+  },
+  "catDesc_dialogs": {
+    "message": "경고, 확인, 입력 대화상자에 응답",
+    "description": "One-line description of the Dialogs permission category"
+  },
+  "catDesc_power": {
+    "message": "페이지에서 임의의 코드 실행 (다른 모든 권한에 접근 가능)",
+    "description": "One-line description of the Power (arbitrary code) permission category"
+  },
+  "catDesc_trusted": {
+    "message": "실제 마우스 및 키보드 입력",
+    "description": "One-line description of the Trusted Input (CDP) permission category"
+  },
+  "catDesc_clipboard": {
+    "message": "클립보드 읽기 및 쓰기",
+    "description": "One-line description of the Clipboard permission category"
+  },
+  "catDesc_browsing_data": {
+    "message": "기록, 캐시, 쿠키 삭제",
+    "description": "One-line description of the Browsing Data permission category"
+  },
+  "catDesc_notifications": {
+    "message": "데스크톱 알림 표시",
+    "description": "One-line description of the Notifications permission category"
+  },
+  "catDesc_emulation": {
+    "message": "기기, 화면, CPU, 위치 에뮬레이션",
+    "description": "One-line description of the Emulation permission category"
+  },
+  "catDesc_performance": {
+    "message": "페이지 속도 측정 및 트레이스 기록",
+    "description": "One-line description of the Performance permission category"
+  },
+  "catDesc_system": {
+    "message": "방문 기록 및 사이트 권한",
+    "description": "One-line description of the System permission category"
+  },
+  "pairedShort": {
+    "message": "페어링됨",
+    "description": "Short pairing state in the line under the popup header (the full text is its tooltip)"
+  },
+  "noticeUnknownServerTitle": {
+    "message": "알 수 없는 서버",
+    "description": "Notice title when the program on the bridge port could not prove it is the paired MCP server. Same words as the matching help heading"
+  },
+  "noticeUnknownServerBody": {
+    "message": "이 포트의 프로그램은 페어링한 서버가 아닙니다. 명령은 실행되지 않았습니다.",
+    "description": "Notice text for an unknown server: it is not the paired server and nothing was run. Keep it as short as the English; no file names or settings"
+  },
+  "noticeRepairTitle": {
+    "message": "페어링 필요",
+    "description": "Notice title when this browser has to pair with the MCP server again; the notice shows the Re-pair button"
+  },
+  "noticeRepairBody": {
+    "message": "서버를 직접 초기화했다면 다시 페어링하세요.",
+    "description": "Notice text next to the Re-pair button: pair again only if the user reset the server. One short sentence"
+  },
+  "noticeAuthFailedBody": {
+    "message": "페어링을 해제한 뒤 서버를 --pair 옵션으로 한 번 시작하세요.",
+    "description": "Notice text when the MCP server rejected this browser's pairing proof, next to the Forget pairing button. Keep --pair verbatim. One short sentence"
+  },
+  "noticePairClosedTitle": {
+    "message": "페어링이 허용되지 않음",
+    "description": "Notice title when the MCP server accepts no new pairing because it is paired with another install"
+  },
+  "noticePairClosedBody": {
+    "message": "서버를 --pair 옵션으로 한 번 시작하세요.",
+    "description": "Notice text when pairing is closed. Keep --pair unchanged: it is a command-line flag. One short sentence"
+  },
+  "noticeVersionTitle": {
+    "message": "버전이 일치하지 않음",
+    "description": "Notice title when the extension and the MCP server use different protocol versions"
+  },
+  "noticeVersionServer": {
+    "message": "MCP 서버를 이 확장 프로그램과 같은 버전으로 업데이트하세요.",
+    "description": "Version notice text when the MCP server is the older side. One short sentence"
+  },
+  "noticeVersionExtension": {
+    "message": "이 확장 프로그램을 MCP 서버와 같은 버전으로 업데이트하세요.",
+    "description": "Version notice text when this extension is the older side. One short sentence"
+  },
+  "noticeVersionBoth": {
+    "message": "확장 프로그램과 MCP 서버를 같은 버전으로 업데이트하세요.",
+    "description": "Version notice text when it is unknown which side is older. One short sentence"
+  },
+  "noticeRejectedTitle": {
+    "message": "확장 프로그램을 인식할 수 없음",
+    "description": "Notice title when the MCP server does not trust this extension's ID"
+  },
+  "noticeRejectedBody": {
+    "message": "이 확장 프로그램의 ID를 서버의 신뢰 목록에 추가하세요.",
+    "description": "Notice text next to the Copy ID button (btnCopyId): the user adds the copied ID to the server's trusted list. One short sentence"
+  },
+  "noticeClosedTitle": {
+    "message": "연결 종료됨",
+    "description": "Notice title when the MCP server closed the connection for another reason (the notice has no further text)"
+  },
+  "btnDetails": {
+    "message": "자세히",
+    "description": "Link-style button in every notice that opens the matching help section on GitHub"
+  },
+  "btnCopyId": {
+    "message": "ID 복사",
+    "description": "Notice button that copies this extension's ID to the clipboard"
   }
 }

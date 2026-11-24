@@ -85,32 +85,36 @@ setup, whatever connects first is paired.
 
 ## Popup states
 
-The badge is in the popup header. The line under it (the pair bar) describes the pairing, and a notice box
-explains problems. A problem state stays on screen across the slow retries until a handshake succeeds or you
-act.
+The badge is in the popup header. The line under it shows the server version once paired, the pairing state and
+the number of agent tabs. A problem shows a notice: a short title, one sentence, at most one button (**Re-pair**,
+**Forget pairing** or **Copy ID**) and a **Details** link that opens the matching section below, with the full fix. A problem state
+stays on screen across the slow retries until a handshake succeeds or you act.
 
 | Badge | Notice / line under the header | Close code | What to do |
 |---|---|---|---|
-| **Connected** | Paired with the MCP server · Server v… | - | [Connected](#connected) |
+| **Connected** | Server v… · Paired | - | [Connected](#connected) |
 | **Connecting…** | Verifying the MCP server… | - | [Connecting](#connecting) |
-| **No server** | Not paired yet / This browser holds a pairing key | none | [No server](#no-server) |
-| **Action needed** | The MCP server asks to pair again (**Re-pair** button) | `4100` | [Re-pair offered](#action-needed-the-mcp-server-asks-to-pair-again) |
-| **Rejected** | Pairing is closed on the MCP server | `4004` | [Pairing is closed](#rejected-pairing-is-closed-on-the-mcp-server) |
-| **Unverified server** | The server could not prove its identity | `4101` | [Unverified server](#unverified-server-the-server-could-not-prove-its-identity) |
-| **Rejected** | The MCP server rejected this browser's pairing proof | `4005` | [Proof rejected](#rejected-the-mcp-server-rejected-this-browsers-pairing-proof) |
-| **Update needed** | Extension and MCP server versions do not match | `4002`, `4102` | [Version mismatch](#version-mismatch) |
-| **Rejected** | The MCP server rejected this extension (id and **Copy** button) | `4003` | [Untrusted extension id](#rejected-the-mcp-server-rejected-this-extension) |
-| **Rejected** | The MCP server closed the connection (`<code> <reason>`) | `4008` and others | [Other closes](#rejected-the-mcp-server-closed-the-connection) |
+| **No server** | Not paired yet (nothing when this browser already holds a key) | none | [No server](#no-server) |
+| **Unknown server** | Unknown server | `4101` | [Unknown server](#unknown-server) |
+| **Pairing needed** | Pairing needed (**Re-pair** button) | `4100` | [Pairing needed](#pairing-needed) |
+| **Pairing needed** | Pairing needed (**Forget pairing** button) | `4005` | [Pairing needed](#pairing-needed) |
+| **Pairing needed** | Pairing is closed | `4004` | [Pairing is closed](#pairing-is-closed) |
+| **Update needed** | Versions do not match | `4002`, `4102` | [Versions do not match](#versions-do-not-match) |
+| **Rejected** | Extension not recognized (**Copy ID** button) | `4003` | [Extension not recognized](#extension-not-recognized) |
+| **Disconnected** | Connection closed | `4008` and others | [Connection closed](#connection-closed) |
 | **Error** | - | - | The popup could not read the extension's status: reopen the popup, or reload the extension |
 
 After a refusal the extension tries again every 30 seconds. Reloading the extension in `chrome://extensions`
 (or `edge://extensions`) reconnects at once and keeps its pairing.
 
+<!-- The popup's Details links (DOCS_URL in extension/popup.js) open the notice headings below by their GitHub
+anchors: keep these titles in sync with the notice titles. -->
+
 ### Connected
 
 Everything works. If the agent still reports `Browser extension not connected`, its server process may use
-another port: compare the port in the popup header (`127.0.0.1:8765`) with `--port` / `BROWSER_MCP_PORT` of
-the server.
+another port: compare the port in the popup's **⋯** menu (**Bridge port**) with `--port` / `BROWSER_MCP_PORT`
+of the server.
 
 ### Connecting
 
@@ -125,19 +129,54 @@ Nothing accepted the connection:
 
 - The server runs only while an MCP client runs it. Start a client session, or run the launch command from the
   README in a terminal.
-- The port in the popup footer must match the server's port (`--port`, `BROWSER_MCP_PORT`, default `8765`).
-  Change it in the popup footer if needed.
+- The port in the popup's **⋯** menu (**Bridge port**) must match the server's port (`--port`,
+  `BROWSER_MCP_PORT`, default `8765`). Change it there if needed.
 - If the server cannot bind its port, it logs `Cannot bind the browser-mcp bridge on 127.0.0.1:<port> ...` (on
   Windows the port may be in a reserved range).
 - The line under the header still shows whether this browser holds a pairing key (**This browser holds a
   pairing key**) or not (**Not paired yet**: the first server that offers pairing will be trusted
   automatically).
 
-### Action needed: "The MCP server asks to pair again"
+### Unknown server
 
-The server on the port offered a new pairing key, but this browser already holds one, so the extension declined
-(`4100 pair-declined`). This happens when the server lost its keys: `extension-keys.json` was deleted, the
-server runs with another `BROWSER_MCP_HOME`, under another OS user, or on a reinstalled system.
+The program on the port is not the server this browser paired with: it could not prove that it holds this
+browser's pairing key, so the extension closed the connection (`4101 server-auth-failed`) and ran no command.
+Typical causes:
+
+- this browser was paired with another server or config directory since (for example two MCP clients with
+  different `BROWSER_MCP_HOME` on the same port);
+- the server's `extension-keys.json` was replaced or restored from an older copy, or you reset the server's
+  pairing data;
+- a program that is not your server listens on the port (also one that relays the connection to a real
+  browser-mcp server on another port: the proofs are bound to the port the extension dialed).
+
+Fix:
+
+1. Check what listens on the port (see [Connecting](#connecting)). If it is not your server, stop that program or
+   move both sides to another port, and do not pair with it.
+2. When the server is yours, either click **Forget pairing** in the popup's **⋯** menu and
+   [start the server once with `--pair`](#start-the-server-once-with---pair) (or `BROWSER_MCP_PAIR=1`), or
+   delete `extension-keys.json` in the server's [config directory](configuration.md#config-directory) and click
+   **Re-pair** when the popup shows [Pairing needed](#pairing-needed). The server reads the file on every
+   connection, so no restart is needed; deleting it unpairs every browser
+   ([Reset all pairings](#reset-all-pairings)).
+3. Make every server process on this port use the same config directory
+   ([Several MCP clients or agents](#several-mcp-clients-or-agents)).
+
+### Pairing needed
+
+This browser's pairing key and the server's do not match, and pairing again fixes it. Two closes lead here, and
+the notice shows the button that fixes each one (**Re-pair** after `4100`, **Forget pairing** after `4005`); both
+are also in the popup's **⋯** menu under **Pairing**:
+
+- **The server offered a new key** (`4100 pair-declined`): the server on the port does not know this browser's
+  key and offered a new one, but this browser already holds one, so the extension declined. This happens when
+  the server lost its keys: `extension-keys.json` was deleted, the server runs with another `BROWSER_MCP_HOME`,
+  under another OS user, or on a reinstalled system.
+- **The server rejected this browser's proof** (`4005 auth-failed`): the server holds a different key for this
+  install than the extension does. The server logs `extension <id> failed authentication (install <installId>)`.
+
+Fix after `4100`:
 
 - If you reset or moved the server yourself, click **Re-pair**. The button shows **Waiting for the server…**;
   the extension reconnects at once and accepts the server's next pairing offer within 2 minutes, replacing its
@@ -145,68 +184,65 @@ server runs with another `BROWSER_MCP_HOME`, under another OS user, or on a rein
 - If you did not, do **not** click it: another program may be imitating the server. Check what listens on the
   port (see [Connecting](#connecting)).
 
-If **Re-pair** ends in **Pairing is closed**, another install paired first or the server's pairing window
-closed in the meantime: start the server once with `--pair` and click **Re-pair** again.
+Fix after `4005`: **Re-pair** alone does not help, because the server still knows this install and asks for
+its old key instead of offering a new one. Click **Forget pairing** in the notice (or in the popup's **⋯** menu) and
+[start the server once with `--pair`](#start-the-server-once-with---pair) (or `BROWSER_MCP_PAIR=1`); or delete
+`extension-keys.json` in the server's [config directory](configuration.md#config-directory) and click **Re-pair**
+when the popup asks (no restart needed). Deleting the file unpairs every browser
+([Reset all pairings](#reset-all-pairings)).
+
+If **Re-pair** ends in [Pairing is closed](#pairing-is-closed), another install paired first or the server's
+pairing window closed in the meantime: start the server once with `--pair` and click **Re-pair** again.
 
 The extension also declines with `4100` when it cannot store a key at all: if its IndexedDB storage cannot be
 opened, the service worker console shows `[mcp] pairing store (IndexedDB) unavailable: ...` and every
 pairing offer is declined. **Re-pair** does not help then; reload the extension or restart the browser.
 
-### Rejected: "Pairing is closed on the MCP server"
+### Pairing is closed
 
 The server already has paired installs and does not know this one, and its pairing window is closed
-(`4004 pairing-closed`). The server logs `refused new install of extension <id>: pairing is closed (start the
-server once with --pair or BROWSER_MCP_PAIR=1, or delete <path>/extension-keys.json)`. Typical causes:
+(`4004 pairing-closed`); the badge shows **Pairing needed**. The server logs `refused new install of extension
+<id>: pairing is closed (start the server once with --pair or BROWSER_MCP_PAIR=1, or delete
+<path>/extension-keys.json)`. Typical causes:
 
 - a second browser or browser profile;
 - the extension was removed and installed again (that is a new install);
 - **Forget pairing** was used while the server's window was closed.
 
-Fix: [start the server once with `--pair`](#start-the-server-once-with---pair). Deleting
-`extension-keys.json` also works but unpairs every browser (see [Reset all pairings](#reset-all-pairings)).
+Fix: [start the server once with `--pair`](#start-the-server-once-with---pair) (or `BROWSER_MCP_PAIR=1`) and
+let this browser connect within 10 minutes. A browser without a key then pairs automatically; one that still
+holds a key (the line under the header then shows no pairing text) shows
+[Pairing needed](#pairing-needed) first: click **Re-pair**. Deleting `extension-keys.json` in the server's
+config directory also works but unpairs every browser (see [Reset all pairings](#reset-all-pairings)).
 
-### Unverified server: "The server could not prove its identity"
+### Versions do not match
 
-The program on the port could not prove that it holds this browser's key, so the extension closed the
-connection (`4101 server-auth-failed`) and ran nothing. Typical causes:
+The extension and the MCP server speak different bridge protocols, which in practice means different releases;
+the badge shows **Update needed**. A different version number alone (a patch release on one side) is not a
+problem and shows no notice. The notice says which side to update:
 
-- this browser was paired with another server or config directory since (for example two MCP clients with
-  different `BROWSER_MCP_HOME` on the same port);
-- the server's `extension-keys.json` was replaced or restored from an older copy;
-- a program that is not your server listens on the port (also one that relays the connection to a real
-  browser-mcp server on another port: the proofs are bound to the port the extension dialed).
-
-Fix, when the server is yours: click **Forget pairing** and
-[start the server once with `--pair`](#start-the-server-once-with---pair); or delete `extension-keys.json`,
-restart the server and click **Re-pair** when the popup asks. Make every server process on this port use the
-same config directory.
-
-### Rejected: "The MCP server rejected this browser's pairing proof"
-
-The server holds a different key for this install than the extension does (`4005 auth-failed`; the server logs
-`extension <id> failed authentication (install <installId>)`). Fix: click **Forget pairing** and start the
-server once with `--pair`, or delete `extension-keys.json`, restart the server and click **Re-pair** when asked.
-
-### Version mismatch
-
-The popup shows **Update needed** ("Extension and MCP server versions do not match"): the two sides speak
-different bridge protocols, which in practice means different releases. The notice says which side to update:
-
-- **The MCP server is older than this extension** (`4102 server-outdated`, or `4002` with a lower server
-  number): a 0.3.x server answered without the protocol-3 handshake. Update the server and restart it. This is
-  common after the store updated the extension on its own.
-- **This extension is older than the MCP server** (`4002 protocol-mismatch:server=3,ext=<n>`): update the
-  extension and reload it. The server logs `refused extension <id>: it speaks bridge protocol <n>, this server
-  speaks 3 (update the extension)`. A 0.3.x extension shows **Rejected** and **The MCP server closed the
-  connection** with `4002 protocol-mismatch:server=3,ext=2` instead.
+- **Update the MCP server to this extension's release** (`4102 server-outdated`, or `4002` with a lower server
+  number): a 0.3.x server answered without the protocol-3 handshake. Update the server, then restart it (close
+  every MCP client session that runs it on this port and start one again). This is common after the store
+  updated the extension on its own.
+- **Update this extension to the MCP server's release** (`4002 protocol-mismatch:server=3,ext=<n>`): update the
+  extension, then reload it in `chrome://extensions` (or `edge://extensions`). The server logs `refused
+  extension <id>: it speaks bridge protocol <n>, this server speaks 3 (update the extension)`. A 0.3.x extension
+  shows **Rejected** and **The MCP server closed the connection** with `4002 protocol-mismatch:server=3,ext=2`
+  instead.
+- **Update the extension and the MCP server to the same release**: the close did not say which side is older.
+  Update both, restart the server and reload the extension.
 
 See [Extension updates and server updates](#extension-updates-and-server-updates) and
 [Legacy mode](#legacy-mode).
 
-### Rejected: "The MCP server rejected this extension"
+### Extension not recognized
 
 The server does not trust this extension id (`4003 untrusted-extension:<id>`); see
-[Extension ids](#extension-ids). The notice shows the id with a **Copy** button. Then either:
+[Extension ids](#extension-ids). The badge shows **Rejected**. This happens with an unpacked build loaded from
+another folder, a second extension id next to the store version, or an id that is not on an explicit list.
+
+Fix: click **Copy ID** in the notice (the **⋯** menu shows the id under **Extension** too). Then either:
 
 - set `BROWSER_MCP_EXTENSION_IDS=<id>` in the MCP client config (not in a project `.env` file, which cannot set
   it) or pass `--extension-id <id>`; or
@@ -216,13 +252,15 @@ and restart the server. A new id is also a new install, so unless `extension-key
 `--pair` for that start (`--extension-id <id> --pair`). After one successful connection the id is saved in
 `trusted-extensions.json` and the flags are no longer needed.
 
-### Rejected: "The MCP server closed the connection"
+### Connection closed
 
-The notice shows the close code and reason:
+The server closed the connection during the handshake for a reason that has no notice of its own; the badge
+shows **Disconnected**. The popup does not show the close code: `browser_status` reports it as
+`lastExtensionRefusal` (see [Diagnostics](#diagnostics)).
 
 - `4008 handshake-timeout`: the extension did not finish the handshake within 5 seconds (for example while the
   browser was busy). It reconnects by itself.
-- Any other code: see [Close codes](#close-codes) and the server log.
+- Any other code: see [Close codes](#close-codes) and [Diagnostics](#diagnostics).
 
 ## Common tasks
 
@@ -235,7 +273,7 @@ shows **Pairing is closed**. Start the server once with `--pair` (next section) 
 connect within 10 minutes; it pairs automatically because it holds no key yet. Each run admits one install, so
 repeat it for every further browser. If the second browser uses another extension id (an unpacked build next to
 the store version, or one loaded from a new folder), see
-[Untrusted extension id](#rejected-the-mcp-server-rejected-this-extension) as well.
+[Extension not recognized](#extension-not-recognized) as well.
 
 ### Start the server once with --pair
 
@@ -267,17 +305,20 @@ connect at once. Do not leave `--pair` in your configuration: the window closes 
 
 ### Re-pair
 
-**Re-pair** appears only in the **Action needed** state. It keeps the old key until the server's next pairing
-offer (within 2 minutes) replaces it, and reconnects right away. It never pairs with a server whose pairing
-window is closed.
+**Re-pair** is in the popup's **⋯** menu under **Pairing**, and the **Pairing needed** notice after `4100` shows it
+as well.
+It keeps the old key until the server's next pairing offer (within 2 minutes) replaces it, and reconnects right
+away. It never pairs with a server whose pairing window is closed.
 
 ### Forget pairing
 
-**Forget pairing** appears in the line under the header while this browser holds a key. Click it twice (the
-second click within 4 seconds confirms). It deletes this browser's key (the install id stays) and reconnects.
+**Forget pairing** is in the popup's **⋯** menu under **Pairing**, and the **Pairing needed** notice after `4005`
+shows it as well; it is disabled while this browser holds no key. It asks for confirmation in a dialog, then deletes this browser's key (the install id stays) and
+reconnects.
 The server then treats the browser as a new install: it pairs at once if the server's pairing window is open (no
 install paired yet, or `--pair`), otherwise the popup shows **Pairing is closed**. Use it to move a browser to
-another server or config directory, or to recover from **Unverified server** and a rejected proof.
+another server or config directory, or to recover from **Unknown server** and a rejected
+proof (**Pairing needed** after `4005`).
 
 ### Reset all pairings
 
@@ -285,7 +326,7 @@ Delete `extension-keys.json` in the server's config directory (`browser_status` 
 server reads the file on every connection, so no restart is needed. Then:
 
 - a browser without a key pairs automatically;
-- a browser that still holds a key shows **Action needed**: click **Re-pair**;
+- a browser that still holds a key shows **Pairing needed**: click **Re-pair**;
 - only the first one pairs this way; every further browser needs
   [`--pair`](#start-the-server-once-with---pair).
 
@@ -303,8 +344,9 @@ on first setup.
 - The pairing is lost when the extension is removed and installed again, when it is loaded unpacked from
   another folder (also a new id), in a new browser profile, and when the server's config directory changes.
 - When one side is updated to a new bridge protocol before the other, the popup shows **Update needed** and
-  names the side to update. The popup header shows the extension version, and the line under the header shows
-  the server version once paired.
+  names the side to update ([Versions do not match](#versions-do-not-match)). The popup's **⋯** menu shows the
+  extension version, and the line under the header shows the server version once paired; different version
+  numbers alone (a patch release on one side) are not a problem.
 
 ### Legacy mode
 
@@ -320,7 +362,7 @@ runs commands from a 0.3.x server.
 The first server process on a port owns the bridge and does the pairing; the others relay through it as
 satellites ([bridge-protocol.md](bridge-protocol.md)). Give every server process on the same port the same
 config directory (the same `BROWSER_MCP_HOME`, or none). Otherwise the popup can switch between **Connected**
-and **Unverified server** or **Action needed**, depending on which process owns the port, and a satellite
+and **Unknown server** or **Pairing needed**, depending on which process owns the port, and a satellite
 cannot verify the primary (it logs `WARNING: satellite not linked: ...`).
 
 ## Close codes
@@ -329,14 +371,14 @@ cannot verify the primary (it logs `WARNING: satellite not linked: ...`).
 |---|---|---|---|---|
 | 4001 | `auth-required` | server | A script or satellite did not prove the bridge token (or sent nothing within 5 s); never sent to the extension ([bridge-protocol.md](bridge-protocol.md#scripts-and-other-clients)) | - |
 | 4002 | `protocol-mismatch:server=3,ext=<n>` | server | The extension speaks another bridge protocol (`<n>` = `none` when its hello has none) | Update needed |
-| 4003 | `untrusted-extension:<id>` | server | Extension id not trusted and trust on first use closed | Rejected (id, Copy) |
-| 4004 | `pairing-closed` | server | New install, but the pairing window is closed (also when another install paired first during the handshake) | Rejected (Pairing is closed) |
-| 4005 | `auth-failed` | server | The extension's proof does not match the key the server holds for this install | Rejected (pairing proof) |
+| 4003 | `untrusted-extension:<id>` | server | Extension id not trusted and trust on first use closed | Rejected (Extension not recognized) |
+| 4004 | `pairing-closed` | server | New install, but the pairing window is closed (also when another install paired first during the handshake) | Pairing needed (Pairing is closed) |
+| 4005 | `auth-failed` | server | The extension's proof does not match the key the server holds for this install | Pairing needed (Forget pairing) |
 | 4006 | `replaced` | server | The same install connected again; the older socket is closed (normal) | (not shown) |
-| 4008 | `handshake-timeout` | server | The handshake did not finish within 5 s | Rejected (code shown) |
+| 4008 | `handshake-timeout` | server | The handshake did not finish within 5 s | Disconnected (Connection closed) |
 | 1008 | `bad-hello` | server | Malformed protocol-3 hello (install id or nonce) | No server |
-| 4100 | `pair-declined` | extension | A key was offered, but this browser holds one and Re-pair was not clicked (or the key could not be stored) | Action needed (Re-pair) |
-| 4101 | `server-auth-failed` | extension | The server's proof is wrong, missing or bound to another port, a frame was malformed or out of order; no command was run | Unverified server |
+| 4100 | `pair-declined` | extension | A key was offered, but this browser holds one and Re-pair was not clicked (or the key could not be stored) | Pairing needed (Re-pair) |
+| 4101 | `server-auth-failed` | extension | The server's proof is wrong, missing or bound to another port, a frame was malformed or out of order; no command was run | Unknown server |
 | 4102 | `server-outdated` | extension | The server answered `welcome` without a protocol-3 handshake (an older server) | Update needed |
 
 After 4002-4005 and 4100-4102 the extension retries every 30 s; after any other close it reconnects with a

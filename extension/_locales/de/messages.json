@@ -29,7 +29,11 @@
   },
   "statusRejected": {
     "message": "Abgelehnt",
-    "description": "Status badge when the MCP server refused the connection"
+    "description": "Status badge when the MCP server does not trust this extension's id"
+  },
+  "statusDisconnected": {
+    "message": "Getrennt",
+    "description": "Status badge when the MCP server closed the connection for another reason (for example a handshake timeout)"
   },
   "statusPairedTitle": {
     "message": "Mit dem MCP-Server gekoppelt",
@@ -39,41 +43,25 @@
     "message": "Verbunden, warte auf den Handshake des MCP-Servers",
     "description": "Status badge tooltip while connected but the server handshake is pending"
   },
-  "activeTabTag": {
-    "message": "🌐 Tab",
-    "description": "Active tab prefix"
-  },
   "tabPermissions": {
     "message": "Berechtigungen",
     "description": "Navigation button for permissions"
   },
   "tabRecentCommands": {
-    "message": "Letzte Befehle",
-    "description": "Navigation button for recent commands"
+    "message": "Verlauf",
+    "description": "Navigation tab for the command history pane"
   },
   "searchPlaceholder": {
     "message": "Berechtigungen suchen…",
     "description": "Search input placeholder"
-  },
-  "btnAll": {
-    "message": "Alle",
-    "description": "Enable all button"
-  },
-  "btnNone": {
-    "message": "Keine",
-    "description": "Disable all button"
   },
   "noResults": {
     "message": "Keine Ergebnisse",
     "description": "Search no results text"
   },
   "permsAgentNote": {
-    "message": "Der KI-Agent kann Berechtigungen nur deaktivieren. Wieder aktivieren lassen sie sich nur hier.",
+    "message": "Der Agent kann Berechtigungen nur deaktivieren.",
     "description": "Hint under the permission search: the agent can only disable permissions"
-  },
-  "executionHistory": {
-    "message": "Ausführungsverlauf",
-    "description": "History section title"
   },
   "btnClear": {
     "message": "Leeren",
@@ -116,24 +104,8 @@
     "description": "Language selector tooltip"
   },
   "langAuto": {
-    "message": "🌐 Automatisch",
-    "description": "Auto language label"
-  },
-  "trustRejectedTitle": {
-    "message": "Der MCP-Server hat diese Erweiterung abgelehnt",
-    "description": "Notice title when the MCP server rejected this extension id (close code 4003)"
-  },
-  "trustRejectedBody": {
-    "message": "Diese Erweiterungs-ID steht nicht auf der Liste vertrauenswürdiger IDs des Servers. Führen Sie einen der folgenden Schritte aus und starten Sie den MCP-Server anschließend neu:",
-    "description": "Notice text explaining how to make the MCP server trust this extension"
-  },
-  "trustOptEnv": {
-    "message": "Setzen Sie diese Umgebungsvariable für den MCP-Server:",
-    "description": "Notice option: environment variable to trust this extension id"
-  },
-  "trustOptReset": {
-    "message": "Oder löschen Sie diese Datei, um erneut mit der nächsten Erweiterung zu koppeln, die sich verbindet:",
-    "description": "Notice option: delete the trusted-extensions file to pair again"
+    "message": "Automatisch",
+    "description": "Language option that follows the browser's language (no emoji or icon)"
   },
   "extensionIdLabel": {
     "message": "Erweiterungs-ID",
@@ -147,16 +119,12 @@
     "message": "Kopiert",
     "description": "Copy button feedback after copying"
   },
-  "serverClosedTitle": {
-    "message": "Der MCP-Server hat die Verbindung geschlossen",
-    "description": "Notice title when the MCP server closed the connection with another code"
-  },
   "statusActionNeeded": {
-    "message": "Aktion erforderlich",
-    "description": "Status badge when the user must decide whether to accept a new pairing offer"
+    "message": "Kopplung nötig",
+    "description": "Status badge when this browser has to pair with the MCP server again (new pairing offer, rejected pairing proof or pairing closed)"
   },
   "statusUntrustedServer": {
-    "message": "Server ungeprüft",
+    "message": "Unbekannter Server",
     "description": "Status badge when the program on the port could not prove it is the paired MCP server"
   },
   "statusUpdateNeeded": {
@@ -166,10 +134,6 @@
   "pairInfoHandshake": {
     "message": "MCP-Server wird überprüft…",
     "description": "Pairing status line while the server is being verified"
-  },
-  "pairInfoHasKey": {
-    "message": "Dieser Browser besitzt einen Kopplungsschlüssel",
-    "description": "Pairing status line when not connected but a pairing key is stored"
   },
   "pairInfoNoKey": {
     "message": "Noch nicht gekoppelt",
@@ -187,21 +151,9 @@
     "message": "Kopplung vergessen",
     "description": "Small action that deletes the stored pairing key"
   },
-  "btnForgetConfirm": {
-    "message": "Zum Vergessen erneut klicken",
-    "description": "Forget-pairing action after the first click: asks for a confirming second click"
-  },
   "forgetPairingTitle": {
     "message": "Löscht den Kopplungsschlüssel dieses Browsers und verbindet neu. Dem nächsten MCP-Server, der eine Kopplung anbietet, wird automatisch vertraut.",
     "description": "Tooltip of the forget-pairing action"
-  },
-  "pairRepairTitle": {
-    "message": "Der MCP-Server möchte neu koppeln",
-    "description": "Notice title when the server offered a new pairing and the extension declined it"
-  },
-  "pairRepairBody": {
-    "message": "Ein Server an diesem Port hat einen neuen Kopplungsschlüssel angeboten, aber dieser Browser ist bereits mit einem anderen Schlüssel gekoppelt. Klicken Sie nur dann auf „Neu koppeln“, wenn Sie den MCP-Server selbst zurückgesetzt oder neu installiert haben; andernfalls gibt sich möglicherweise ein anderes Programm als dieser aus.",
-    "description": "Notice text for the re-pair offer; must name the Re-pair button (btnRepair)"
   },
   "btnRepair": {
     "message": "Neu koppeln",
@@ -214,50 +166,6 @@
   "repairTitle": {
     "message": "Das nächste Kopplungsangebot des Servers annehmen (2 Minuten lang) und sofort neu verbinden",
     "description": "Tooltip of the Re-pair button"
-  },
-  "pairClosedTitle": {
-    "message": "Die Kopplung ist auf dem MCP-Server geschlossen",
-    "description": "Notice title when the server refuses new pairings (close code 4004)"
-  },
-  "pairClosedBody": {
-    "message": "Der Server ist bereits mit einer anderen Installation gekoppelt. Starten Sie den Server einmal mit --pair (oder BROWSER_MCP_PAIR=1), oder löschen Sie extension-keys.json im Konfigurationsverzeichnis des Servers.",
-    "description": "Notice text for pairing-closed; keep --pair, BROWSER_MCP_PAIR=1 and extension-keys.json unchanged"
-  },
-  "pairKeysFileLabel": {
-    "message": "Kopplungsdatei (Standard-Konfigurationsverzeichnis des Servers):",
-    "description": "Label above the default path of the server pairing file"
-  },
-  "serverAuthFailedTitle": {
-    "message": "Der Server konnte seine Identität nicht nachweisen",
-    "description": "Notice title when the server failed the pairing challenge (close code 4101)"
-  },
-  "serverAuthFailedBody": {
-    "message": "Das Programm an diesem Port besitzt den Kopplungsschlüssel dieses Browsers nicht, daher wurden keine Befehle ausgeführt. Wenn Sie die Kopplungsdaten des Servers zurückgesetzt haben, löschen Sie extension-keys.json im Konfigurationsverzeichnis des Servers, starten Sie den Server neu und klicken Sie hier auf „Neu koppeln“, sobald Sie dazu aufgefordert werden. Andernfalls lauscht möglicherweise ein anderes Programm an diesem Port.",
-    "description": "Notice text for server-auth-failed; keep extension-keys.json unchanged and name the Re-pair button"
-  },
-  "authFailedTitle": {
-    "message": "Der MCP-Server hat den Kopplungsnachweis dieses Browsers abgelehnt",
-    "description": "Notice title when the server rejected the extension proof (close code 4005)"
-  },
-  "authFailedBody": {
-    "message": "Der Server besitzt einen anderen Kopplungsschlüssel für diesen Browser. Löschen Sie extension-keys.json im Konfigurationsverzeichnis des Servers, starten Sie den Server neu und klicken Sie hier auf „Neu koppeln“, sobald Sie dazu aufgefordert werden.",
-    "description": "Notice text for auth-failed; keep extension-keys.json unchanged and name the Re-pair button"
-  },
-  "protocolMismatchTitle": {
-    "message": "Versionen von Erweiterung und MCP-Server passen nicht zusammen",
-    "description": "Notice title when the bridge protocol versions differ"
-  },
-  "protocolUpdateServer": {
-    "message": "Der MCP-Server ist älter als diese Erweiterung. Aktualisieren Sie den MCP-Server auf dieselbe Version wie die Erweiterung und starten Sie ihn neu.",
-    "description": "Protocol mismatch advice: the server is outdated"
-  },
-  "protocolUpdateExtension": {
-    "message": "Diese Erweiterung ist älter als der MCP-Server. Aktualisieren Sie die Erweiterung auf dieselbe Version wie den Server und laden Sie sie neu.",
-    "description": "Protocol mismatch advice: the extension is outdated"
-  },
-  "protocolUpdateBoth": {
-    "message": "Erweiterung und MCP-Server verwenden unterschiedliche Protokollversionen. Aktualisieren Sie beide auf dieselbe Version.",
-    "description": "Protocol mismatch advice when the outdated side is unknown"
   },
   "cat_tabs": {
     "message": "Tabs & Fenster",
@@ -342,5 +250,297 @@
   "cat_performance": {
     "message": "Leistung",
     "description": "Category: Performance"
+  },
+  "menuTitle": {
+    "message": "Mehr",
+    "description": "Accessible name and tooltip of the header button (⋯) that opens the settings menu"
+  },
+  "menuExtension": {
+    "message": "Erweiterung",
+    "description": "Settings menu section: this extension's version and ID"
+  },
+  "menuPort": {
+    "message": "Brücken-Port",
+    "description": "Settings menu section: the local port the extension uses to reach the MCP server"
+  },
+  "menuLanguage": {
+    "message": "Sprache",
+    "description": "Settings menu section: the popup language"
+  },
+  "menuPairing": {
+    "message": "Kopplung",
+    "description": "Settings menu section: re-pair with or forget the MCP server pairing"
+  },
+  "agentTabsNone": {
+    "message": "Keine Agent-Tabs",
+    "description": "Status line under the header: the agent works in no tab (lower case, it follows a separator)"
+  },
+  "agentTabsOne": {
+    "message": "1 Agent-Tab",
+    "description": "Status line under the header: the agent works in one tab"
+  },
+  "agentTabsMany": {
+    "message": "{n} Agent-Tabs",
+    "description": "Status line under the header: number of tabs the agent works in. Keep {n} unchanged: it is replaced by the number (2 or more)"
+  },
+  "agentTabsTitle": {
+    "message": "Tabs, in denen der Agent arbeitet",
+    "description": "Heading of the list of tabs the agent works in (click a tab to switch to it)"
+  },
+  "activityNow": {
+    "message": "Jetzt:",
+    "description": "Live activity strip: label before the command the agent is running right now. Include the colon, with your language's spacing (French: \"En cours :\")"
+  },
+  "activityMore": {
+    "message": "+{n} weitere",
+    "description": "Live activity strip: how many other commands are running at the same time. Keep {n} unchanged: it is replaced by the number"
+  },
+  "profileRead": {
+    "message": "Lesen",
+    "description": "Permission profile (short button label): read-only access"
+  },
+  "profileReadDesc": {
+    "message": "Seiten aufrufen und lesen, Screenshots erstellen. Es wird nichts geklickt oder eingegeben.",
+    "description": "Description of the Read permission profile"
+  },
+  "profileStandard": {
+    "message": "Standard",
+    "description": "Permission profile (short button label): everything except high-risk access"
+  },
+  "profileStandardDesc": {
+    "message": "Zusätzlich Klicken, Eingeben, Netzwerk und Entwicklertools. Kein Zugriff mit hohem Risiko.",
+    "description": "Description of the Standard permission profile"
+  },
+  "profileFull": {
+    "message": "Voll",
+    "description": "Permission profile (short button label): every permission on"
+  },
+  "profileFullDesc": {
+    "message": "Alles, auch Codeausführung, Cookies, Speicher und Verlauf.",
+    "description": "Description of the Full permission profile"
+  },
+  "profileCustom": {
+    "message": "Individuell",
+    "description": "Permission profile (short button label): shown when the switches match no profile; not clickable"
+  },
+  "profileCustomDesc": {
+    "message": "Ihre eigene Auswahl.",
+    "description": "Description shown when the permission switches match no profile"
+  },
+  "riskHigh": {
+    "message": "Hohes Risiko",
+    "description": "Small badge on permission categories that can reach private data or run code"
+  },
+  "confirmHighRiskTitle": {
+    "message": "Zugriff mit hohem Risiko erlauben?",
+    "description": "Title of the confirmation dialog shown before switching on high-risk permissions"
+  },
+  "confirmHighRiskBody": {
+    "message": "Der Agent kann dann Folgendes nutzen: {cats}. Damit lassen sich private Daten wie Anmeldungen, Cookies, Speicher, Zwischenablage und Verlauf lesen oder ändern oder beliebiger Code in Seiten ausführen.",
+    "description": "Body of the high-risk confirmation dialog. Keep {cats} unchanged: it is replaced by a comma-separated list of permission category names"
+  },
+  "confirmAllow": {
+    "message": "Erlauben",
+    "description": "Confirmation dialog button that switches the high-risk permissions on"
+  },
+  "confirmCancel": {
+    "message": "Abbrechen",
+    "description": "Confirmation dialog button that closes the dialog without changing anything"
+  },
+  "confirmForgetTitle": {
+    "message": "Kopplung vergessen?",
+    "description": "Title of the confirmation dialog shown before deleting the pairing key"
+  },
+  "confirmForgetBody": {
+    "message": "Dadurch wird der Kopplungsschlüssel in diesem Browser gelöscht. Für eine neue Verbindung starten Sie den Server einmal mit --pair.",
+    "description": "Body of the forget-pairing confirmation dialog; keep --pair unchanged"
+  },
+  "agentDisabledBadge": {
+    "message": "Vom Agenten deaktiviert",
+    "description": "Small badge next to a permission the AI agent switched off itself"
+  },
+  "agentDisabledHint": {
+    "message": "Der Agent hat dies ausgeschaltet. Nur Sie können es wieder einschalten.",
+    "description": "Tooltip of the off-by-agent badge"
+  },
+  "stopAll": {
+    "message": "Agent stoppen",
+    "description": "Footer button that switches every permission off and cancels running commands"
+  },
+  "stopAllHint": {
+    "message": "Alle Berechtigungen ausschalten und laufende Befehle abbrechen",
+    "description": "Tooltip of the Stop agent button"
+  },
+  "stopAllDone": {
+    "message": "Alles ist aus",
+    "description": "Stop agent button label for a moment after it switched everything off"
+  },
+  "historyFilterAll": {
+    "message": "Alle",
+    "description": "History filter chip: show every command"
+  },
+  "historyFilterErrors": {
+    "message": "Fehler",
+    "description": "History filter chip: show only failed commands"
+  },
+  "historyNoErrors": {
+    "message": "Keine fehlgeschlagenen Befehle",
+    "description": "History list text when the Errors filter matches nothing"
+  },
+  "historyUnknownSite": {
+    "message": "Keine Seite",
+    "description": "History group heading for commands that did not act on a web page"
+  },
+  "catDesc_tabs": {
+    "message": "Tabs und Fenster öffnen, wechseln, navigieren und schließen",
+    "description": "One-line description of the Tabs & Windows permission category"
+  },
+  "catDesc_read": {
+    "message": "Text, HTML und Struktur der Seite lesen",
+    "description": "One-line description of the Page: Read permission category"
+  },
+  "catDesc_interact": {
+    "message": "Klicken, tippen, Formulare ausfüllen und Dateien hochladen",
+    "description": "One-line description of the Page: Interact permission category"
+  },
+  "catDesc_media": {
+    "message": "Screenshots, PDFs und Tab-Audio",
+    "description": "One-line description of the Media permission category"
+  },
+  "catDesc_console": {
+    "message": "Die Seitenkonsole lesen",
+    "description": "One-line description of the Console permission category"
+  },
+  "catDesc_network": {
+    "message": "Anfragen und Antworten sehen, drosseln, Header hinzufügen",
+    "description": "One-line description of the Network: Observe permission category"
+  },
+  "catDesc_mock": {
+    "message": "Netzwerkantworten blockieren oder fälschen",
+    "description": "One-line description of the Network: Intercept permission category"
+  },
+  "catDesc_downloads": {
+    "message": "Downloads verwalten",
+    "description": "One-line description of the Downloads permission category"
+  },
+  "catDesc_bookmarks": {
+    "message": "Lesezeichen suchen, hinzufügen und entfernen",
+    "description": "One-line description of the Bookmarks permission category"
+  },
+  "catDesc_cookies": {
+    "message": "Cookies lesen und ändern, auch Anmeldungen",
+    "description": "One-line description of the Cookies permission category"
+  },
+  "catDesc_storage": {
+    "message": "Website-Speicher und IndexedDB lesen und ändern",
+    "description": "One-line description of the Storage permission category"
+  },
+  "catDesc_sessions": {
+    "message": "Geschlossene Tabs wiederherstellen, Anmeldestatus speichern und laden",
+    "description": "One-line description of the Sessions & State permission category"
+  },
+  "catDesc_dialogs": {
+    "message": "Hinweis-, Bestätigungs- und Eingabedialoge beantworten",
+    "description": "One-line description of the Dialogs permission category"
+  },
+  "catDesc_power": {
+    "message": "Beliebigen Code in Seiten ausführen (erreicht alles andere)",
+    "description": "One-line description of the Power (arbitrary code) permission category"
+  },
+  "catDesc_trusted": {
+    "message": "Echte Maus- und Tastatureingaben",
+    "description": "One-line description of the Trusted Input (CDP) permission category"
+  },
+  "catDesc_clipboard": {
+    "message": "Zwischenablage lesen und schreiben",
+    "description": "One-line description of the Clipboard permission category"
+  },
+  "catDesc_browsing_data": {
+    "message": "Verlauf, Cache und Cookies löschen",
+    "description": "One-line description of the Browsing Data permission category"
+  },
+  "catDesc_notifications": {
+    "message": "Desktop-Benachrichtigungen anzeigen",
+    "description": "One-line description of the Notifications permission category"
+  },
+  "catDesc_emulation": {
+    "message": "Geräte, Bildschirm, CPU und Standort emulieren",
+    "description": "One-line description of the Emulation permission category"
+  },
+  "catDesc_performance": {
+    "message": "Seitengeschwindigkeit messen und Traces aufzeichnen",
+    "description": "One-line description of the Performance permission category"
+  },
+  "catDesc_system": {
+    "message": "Browserverlauf und Website-Berechtigungen",
+    "description": "One-line description of the System permission category"
+  },
+  "pairedShort": {
+    "message": "Gekoppelt",
+    "description": "Short pairing state in the line under the popup header (the full text is its tooltip)"
+  },
+  "noticeUnknownServerTitle": {
+    "message": "Unbekannter Server",
+    "description": "Notice title when the program on the bridge port could not prove it is the paired MCP server. Same words as the matching help heading"
+  },
+  "noticeUnknownServerBody": {
+    "message": "Das Programm an diesem Port ist nicht der gekoppelte Server. Es wurden keine Befehle ausgeführt.",
+    "description": "Notice text for an unknown server: it is not the paired server and nothing was run. Keep it as short as the English; no file names or settings"
+  },
+  "noticeRepairTitle": {
+    "message": "Kopplung nötig",
+    "description": "Notice title when this browser has to pair with the MCP server again; the notice shows the Re-pair button"
+  },
+  "noticeRepairBody": {
+    "message": "Wenn Sie den Server selbst zurückgesetzt haben, koppeln Sie ihn neu.",
+    "description": "Notice text next to the Re-pair button: pair again only if the user reset the server. One short sentence"
+  },
+  "noticeAuthFailedBody": {
+    "message": "Vergessen Sie die Kopplung und starten Sie den Server dann einmal mit --pair.",
+    "description": "Notice text when the MCP server rejected this browser's pairing proof, next to the Forget pairing button. Keep --pair verbatim. One short sentence"
+  },
+  "noticePairClosedTitle": {
+    "message": "Kopplung geschlossen",
+    "description": "Notice title when the MCP server accepts no new pairing because it is paired with another install"
+  },
+  "noticePairClosedBody": {
+    "message": "Starten Sie den Server einmal mit --pair.",
+    "description": "Notice text when pairing is closed. Keep --pair unchanged: it is a command-line flag. One short sentence"
+  },
+  "noticeVersionTitle": {
+    "message": "Versionen passen nicht zusammen",
+    "description": "Notice title when the extension and the MCP server use different protocol versions"
+  },
+  "noticeVersionServer": {
+    "message": "Aktualisieren Sie den MCP-Server auf die Version dieser Erweiterung.",
+    "description": "Version notice text when the MCP server is the older side. One short sentence"
+  },
+  "noticeVersionExtension": {
+    "message": "Aktualisieren Sie diese Erweiterung auf die Version des MCP-Servers.",
+    "description": "Version notice text when this extension is the older side. One short sentence"
+  },
+  "noticeVersionBoth": {
+    "message": "Aktualisieren Sie Erweiterung und MCP-Server auf dieselbe Version.",
+    "description": "Version notice text when it is unknown which side is older. One short sentence"
+  },
+  "noticeRejectedTitle": {
+    "message": "Erweiterung nicht erkannt",
+    "description": "Notice title when the MCP server does not trust this extension's ID"
+  },
+  "noticeRejectedBody": {
+    "message": "Fügen Sie die ID dieser Erweiterung zur Vertrauensliste des Servers hinzu.",
+    "description": "Notice text next to the Copy ID button (btnCopyId): the user adds the copied ID to the server's trusted list. One short sentence"
+  },
+  "noticeClosedTitle": {
+    "message": "Verbindung geschlossen",
+    "description": "Notice title when the MCP server closed the connection for another reason (the notice has no further text)"
+  },
+  "btnDetails": {
+    "message": "Details",
+    "description": "Link-style button in every notice that opens the matching help section on GitHub"
+  },
+  "btnCopyId": {
+    "message": "ID kopieren",
+    "description": "Notice button that copies this extension's ID to the clipboard"
   }
 }

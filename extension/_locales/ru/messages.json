@@ -29,7 +29,11 @@
   },
   "statusRejected": {
     "message": "Отклонено",
-    "description": "Status badge when the MCP server refused the connection"
+    "description": "Status badge when the MCP server does not trust this extension's id"
+  },
+  "statusDisconnected": {
+    "message": "Отключено",
+    "description": "Status badge when the MCP server closed the connection for another reason (for example a handshake timeout)"
   },
   "statusPairedTitle": {
     "message": "Сопряжено с MCP-сервером",
@@ -39,41 +43,25 @@
     "message": "Подключено, ожидание рукопожатия MCP-сервера",
     "description": "Status badge tooltip while connected but the server handshake is pending"
   },
-  "activeTabTag": {
-    "message": "🌐 Вкладка",
-    "description": "Active tab prefix"
-  },
   "tabPermissions": {
     "message": "Разрешения",
     "description": "Navigation button for permissions"
   },
   "tabRecentCommands": {
-    "message": "Последние команды",
-    "description": "Navigation button for recent commands"
+    "message": "История",
+    "description": "Navigation tab for the command history pane"
   },
   "searchPlaceholder": {
     "message": "Поиск разрешений…",
     "description": "Search input placeholder"
-  },
-  "btnAll": {
-    "message": "Все",
-    "description": "Enable all button"
-  },
-  "btnNone": {
-    "message": "Ничего",
-    "description": "Disable all button"
   },
   "noResults": {
     "message": "Нет результатов",
     "description": "Search no results text"
   },
   "permsAgentNote": {
-    "message": "ИИ-агент может только отключать разрешения. Включить их снова можно только здесь.",
+    "message": "Агент может только отключать разрешения.",
     "description": "Hint under the permission search: the agent can only disable permissions"
-  },
-  "executionHistory": {
-    "message": "История выполнения",
-    "description": "History section title"
   },
   "btnClear": {
     "message": "Очистить",
@@ -116,24 +104,8 @@
     "description": "Language selector tooltip"
   },
   "langAuto": {
-    "message": "🌐 Авто",
-    "description": "Auto language label"
-  },
-  "trustRejectedTitle": {
-    "message": "MCP-сервер отклонил это расширение",
-    "description": "Notice title when the MCP server rejected this extension id (close code 4003)"
-  },
-  "trustRejectedBody": {
-    "message": "Идентификатора этого расширения нет в списке доверенных на сервере. Выполните одно из следующих действий, затем перезапустите MCP-сервер:",
-    "description": "Notice text explaining how to make the MCP server trust this extension"
-  },
-  "trustOptEnv": {
-    "message": "Задайте эту переменную окружения для MCP-сервера:",
-    "description": "Notice option: environment variable to trust this extension id"
-  },
-  "trustOptReset": {
-    "message": "Или удалите этот файл, чтобы заново выполнить сопряжение со следующим подключившимся расширением:",
-    "description": "Notice option: delete the trusted-extensions file to pair again"
+    "message": "Авто",
+    "description": "Language option that follows the browser's language (no emoji or icon)"
   },
   "extensionIdLabel": {
     "message": "ID расширения",
@@ -147,16 +119,12 @@
     "message": "Скопировано",
     "description": "Copy button feedback after copying"
   },
-  "serverClosedTitle": {
-    "message": "MCP-сервер закрыл соединение",
-    "description": "Notice title when the MCP server closed the connection with another code"
-  },
   "statusActionNeeded": {
-    "message": "Требуется действие",
-    "description": "Status badge when the user must decide whether to accept a new pairing offer"
+    "message": "Нужно сопряжение",
+    "description": "Status badge when this browser has to pair with the MCP server again (new pairing offer, rejected pairing proof or pairing closed)"
   },
   "statusUntrustedServer": {
-    "message": "Сервер не проверен",
+    "message": "Неизвестный сервер",
     "description": "Status badge when the program on the port could not prove it is the paired MCP server"
   },
   "statusUpdateNeeded": {
@@ -166,10 +134,6 @@
   "pairInfoHandshake": {
     "message": "Проверка MCP-сервера…",
     "description": "Pairing status line while the server is being verified"
-  },
-  "pairInfoHasKey": {
-    "message": "В этом браузере сохранён ключ сопряжения",
-    "description": "Pairing status line when not connected but a pairing key is stored"
   },
   "pairInfoNoKey": {
     "message": "Сопряжение ещё не выполнено",
@@ -187,21 +151,9 @@
     "message": "Забыть сопряжение",
     "description": "Small action that deletes the stored pairing key"
   },
-  "btnForgetConfirm": {
-    "message": "Нажмите ещё раз, чтобы забыть",
-    "description": "Forget-pairing action after the first click: asks for a confirming second click"
-  },
   "forgetPairingTitle": {
     "message": "Удаляет ключ сопряжения этого браузера и переподключается. Следующий MCP-сервер, предложивший сопряжение, получит доверие автоматически.",
     "description": "Tooltip of the forget-pairing action"
-  },
-  "pairRepairTitle": {
-    "message": "MCP-сервер просит выполнить сопряжение заново",
-    "description": "Notice title when the server offered a new pairing and the extension declined it"
-  },
-  "pairRepairBody": {
-    "message": "Сервер на этом порту предложил новый ключ сопряжения, но этот браузер уже сопряжён с другим ключом. Нажимайте «Сопрячь заново», только если вы сами сбросили или переустановили MCP-сервер; иначе другая программа может выдавать себя за него.",
-    "description": "Notice text for the re-pair offer; must name the Re-pair button (btnRepair)"
   },
   "btnRepair": {
     "message": "Сопрячь заново",
@@ -214,50 +166,6 @@
   "repairTitle": {
     "message": "Принять следующее предложение сопряжения от сервера (в течение 2 минут) и переподключиться сейчас",
     "description": "Tooltip of the Re-pair button"
-  },
-  "pairClosedTitle": {
-    "message": "Сопряжение на MCP-сервере закрыто",
-    "description": "Notice title when the server refuses new pairings (close code 4004)"
-  },
-  "pairClosedBody": {
-    "message": "Сервер уже сопряжён с другой установкой. Запустите сервер один раз с --pair (или BROWSER_MCP_PAIR=1) либо удалите extension-keys.json в каталоге конфигурации сервера.",
-    "description": "Notice text for pairing-closed; keep --pair, BROWSER_MCP_PAIR=1 and extension-keys.json unchanged"
-  },
-  "pairKeysFileLabel": {
-    "message": "Файл сопряжения (каталог конфигурации сервера по умолчанию):",
-    "description": "Label above the default path of the server pairing file"
-  },
-  "serverAuthFailedTitle": {
-    "message": "Сервер не смог подтвердить свою подлинность",
-    "description": "Notice title when the server failed the pairing challenge (close code 4101)"
-  },
-  "serverAuthFailedBody": {
-    "message": "У программы на этом порту нет ключа сопряжения этого браузера, поэтому команды не выполнялись. Если вы сбросили данные сопряжения сервера, удалите extension-keys.json в каталоге конфигурации сервера, перезапустите сервер и нажмите здесь «Сопрячь заново», когда появится запрос. Иначе на этом порту может работать другая программа.",
-    "description": "Notice text for server-auth-failed; keep extension-keys.json unchanged and name the Re-pair button"
-  },
-  "authFailedTitle": {
-    "message": "MCP-сервер отклонил подтверждение сопряжения этого браузера",
-    "description": "Notice title when the server rejected the extension proof (close code 4005)"
-  },
-  "authFailedBody": {
-    "message": "У сервера другой ключ сопряжения для этого браузера. Удалите extension-keys.json в каталоге конфигурации сервера, перезапустите сервер и нажмите здесь «Сопрячь заново», когда появится запрос.",
-    "description": "Notice text for auth-failed; keep extension-keys.json unchanged and name the Re-pair button"
-  },
-  "protocolMismatchTitle": {
-    "message": "Версии расширения и MCP-сервера не совпадают",
-    "description": "Notice title when the bridge protocol versions differ"
-  },
-  "protocolUpdateServer": {
-    "message": "MCP-сервер старше этого расширения. Обновите MCP-сервер до той же версии, что и расширение, и перезапустите его.",
-    "description": "Protocol mismatch advice: the server is outdated"
-  },
-  "protocolUpdateExtension": {
-    "message": "Это расширение старше MCP-сервера. Обновите расширение до той же версии, что и сервер, и перезагрузите его.",
-    "description": "Protocol mismatch advice: the extension is outdated"
-  },
-  "protocolUpdateBoth": {
-    "message": "Расширение и MCP-сервер используют разные версии протокола. Обновите оба до одной версии.",
-    "description": "Protocol mismatch advice when the outdated side is unknown"
   },
   "cat_tabs": {
     "message": "Вкладки и окна",
@@ -312,7 +220,7 @@
     "description": "Category: Dialogs"
   },
   "cat_power": {
-    "message": "Расширенный код (произвольный)",
+    "message": "Произвольный код",
     "description": "Category: Power"
   },
   "cat_trusted": {
@@ -342,5 +250,297 @@
   "cat_performance": {
     "message": "Производительность",
     "description": "Category: Performance"
+  },
+  "menuTitle": {
+    "message": "Ещё",
+    "description": "Accessible name and tooltip of the header button (⋯) that opens the settings menu"
+  },
+  "menuExtension": {
+    "message": "Расширение",
+    "description": "Settings menu section: this extension's version and ID"
+  },
+  "menuPort": {
+    "message": "Порт моста",
+    "description": "Settings menu section: the local port the extension uses to reach the MCP server"
+  },
+  "menuLanguage": {
+    "message": "Язык",
+    "description": "Settings menu section: the popup language"
+  },
+  "menuPairing": {
+    "message": "Сопряжение",
+    "description": "Settings menu section: re-pair with or forget the MCP server pairing"
+  },
+  "agentTabsNone": {
+    "message": "Нет вкладок агента",
+    "description": "Status line under the header: the agent works in no tab (lower case, it follows a separator)"
+  },
+  "agentTabsOne": {
+    "message": "1 вкладка агента",
+    "description": "Status line under the header: the agent works in one tab"
+  },
+  "agentTabsMany": {
+    "message": "вкладок агента: {n}",
+    "description": "Status line under the header: number of tabs the agent works in. Keep {n} unchanged: it is replaced by the number (2 or more)"
+  },
+  "agentTabsTitle": {
+    "message": "Вкладки, в которых работает агент",
+    "description": "Heading of the list of tabs the agent works in (click a tab to switch to it)"
+  },
+  "activityNow": {
+    "message": "Сейчас:",
+    "description": "Live activity strip: label before the command the agent is running right now. Include the colon, with your language's spacing (French: \"En cours :\")"
+  },
+  "activityMore": {
+    "message": "ещё {n}",
+    "description": "Live activity strip: how many other commands are running at the same time. Keep {n} unchanged: it is replaced by the number"
+  },
+  "profileRead": {
+    "message": "Чтение",
+    "description": "Permission profile (short button label): read-only access"
+  },
+  "profileReadDesc": {
+    "message": "Просмотр и чтение страниц, скриншоты. Никаких кликов и ввода текста.",
+    "description": "Description of the Read permission profile"
+  },
+  "profileStandard": {
+    "message": "Стандарт",
+    "description": "Permission profile (short button label): everything except high-risk access"
+  },
+  "profileStandardDesc": {
+    "message": "Также клики, ввод, сеть и инструменты разработчика. Без доступа с высоким риском.",
+    "description": "Description of the Standard permission profile"
+  },
+  "profileFull": {
+    "message": "Полный",
+    "description": "Permission profile (short button label): every permission on"
+  },
+  "profileFullDesc": {
+    "message": "Всё, включая выполнение кода, файлы cookie, хранилище и историю.",
+    "description": "Description of the Full permission profile"
+  },
+  "profileCustom": {
+    "message": "Свой",
+    "description": "Permission profile (short button label): shown when the switches match no profile; not clickable"
+  },
+  "profileCustomDesc": {
+    "message": "Ваш собственный выбор.",
+    "description": "Description shown when the permission switches match no profile"
+  },
+  "riskHigh": {
+    "message": "Высокий риск",
+    "description": "Small badge on permission categories that can reach private data or run code"
+  },
+  "confirmHighRiskTitle": {
+    "message": "Разрешить доступ с высоким риском?",
+    "description": "Title of the confirmation dialog shown before switching on high-risk permissions"
+  },
+  "confirmHighRiskBody": {
+    "message": "Агент сможет использовать: {cats}. Эти разрешения позволяют читать или изменять личные данные, такие как данные для входа, файлы cookie, хранилище, буфер обмена и историю, или выполнять любой код на страницах.",
+    "description": "Body of the high-risk confirmation dialog. Keep {cats} unchanged: it is replaced by a comma-separated list of permission category names"
+  },
+  "confirmAllow": {
+    "message": "Разрешить",
+    "description": "Confirmation dialog button that switches the high-risk permissions on"
+  },
+  "confirmCancel": {
+    "message": "Отмена",
+    "description": "Confirmation dialog button that closes the dialog without changing anything"
+  },
+  "confirmForgetTitle": {
+    "message": "Забыть сопряжение?",
+    "description": "Title of the confirmation dialog shown before deleting the pairing key"
+  },
+  "confirmForgetBody": {
+    "message": "Ключ сопряжения в этом браузере будет удалён. Чтобы подключиться снова, запустите сервер один раз с --pair.",
+    "description": "Body of the forget-pairing confirmation dialog; keep --pair unchanged"
+  },
+  "agentDisabledBadge": {
+    "message": "Отключено агентом",
+    "description": "Small badge next to a permission the AI agent switched off itself"
+  },
+  "agentDisabledHint": {
+    "message": "Агент отключил это разрешение. Включить его снова можете только вы.",
+    "description": "Tooltip of the off-by-agent badge"
+  },
+  "stopAll": {
+    "message": "Остановить агента",
+    "description": "Footer button that switches every permission off and cancels running commands"
+  },
+  "stopAllHint": {
+    "message": "Отключить все разрешения и отменить выполняемые команды",
+    "description": "Tooltip of the Stop agent button"
+  },
+  "stopAllDone": {
+    "message": "Всё отключено",
+    "description": "Stop agent button label for a moment after it switched everything off"
+  },
+  "historyFilterAll": {
+    "message": "Все",
+    "description": "History filter chip: show every command"
+  },
+  "historyFilterErrors": {
+    "message": "Ошибки",
+    "description": "History filter chip: show only failed commands"
+  },
+  "historyNoErrors": {
+    "message": "Нет неудачных команд",
+    "description": "History list text when the Errors filter matches nothing"
+  },
+  "historyUnknownSite": {
+    "message": "Без страницы",
+    "description": "History group heading for commands that did not act on a web page"
+  },
+  "catDesc_tabs": {
+    "message": "Открытие, переключение, навигация и закрытие вкладок и окон",
+    "description": "One-line description of the Tabs & Windows permission category"
+  },
+  "catDesc_read": {
+    "message": "Чтение текста, HTML и структуры страницы",
+    "description": "One-line description of the Page: Read permission category"
+  },
+  "catDesc_interact": {
+    "message": "Клики, ввод текста, заполнение форм и загрузка файлов",
+    "description": "One-line description of the Page: Interact permission category"
+  },
+  "catDesc_media": {
+    "message": "Скриншоты, PDF и звук вкладок",
+    "description": "One-line description of the Media permission category"
+  },
+  "catDesc_console": {
+    "message": "Чтение консоли страницы",
+    "description": "One-line description of the Console permission category"
+  },
+  "catDesc_network": {
+    "message": "Просмотр запросов и ответов, замедление сети, добавление заголовков",
+    "description": "One-line description of the Network: Observe permission category"
+  },
+  "catDesc_mock": {
+    "message": "Блокировка или подмена сетевых ответов",
+    "description": "One-line description of the Network: Intercept permission category"
+  },
+  "catDesc_downloads": {
+    "message": "Управление загрузками",
+    "description": "One-line description of the Downloads permission category"
+  },
+  "catDesc_bookmarks": {
+    "message": "Поиск, добавление и удаление закладок",
+    "description": "One-line description of the Bookmarks permission category"
+  },
+  "catDesc_cookies": {
+    "message": "Чтение и изменение файлов cookie, включая данные входа",
+    "description": "One-line description of the Cookies permission category"
+  },
+  "catDesc_storage": {
+    "message": "Чтение и изменение хранилища сайта и IndexedDB",
+    "description": "One-line description of the Storage permission category"
+  },
+  "catDesc_sessions": {
+    "message": "Восстановление закрытых вкладок, сохранение и загрузка состояния входа",
+    "description": "One-line description of the Sessions & State permission category"
+  },
+  "catDesc_dialogs": {
+    "message": "Ответы на окна предупреждений, подтверждений и запросов",
+    "description": "One-line description of the Dialogs permission category"
+  },
+  "catDesc_power": {
+    "message": "Выполнение любого кода на страницах (даёт доступ ко всему остальному)",
+    "description": "One-line description of the Power (arbitrary code) permission category"
+  },
+  "catDesc_trusted": {
+    "message": "Настоящий ввод с мыши и клавиатуры",
+    "description": "One-line description of the Trusted Input (CDP) permission category"
+  },
+  "catDesc_clipboard": {
+    "message": "Чтение и запись буфера обмена",
+    "description": "One-line description of the Clipboard permission category"
+  },
+  "catDesc_browsing_data": {
+    "message": "Очистка истории, кеша и файлов cookie",
+    "description": "One-line description of the Browsing Data permission category"
+  },
+  "catDesc_notifications": {
+    "message": "Показ уведомлений на рабочем столе",
+    "description": "One-line description of the Notifications permission category"
+  },
+  "catDesc_emulation": {
+    "message": "Эмуляция устройств, экрана, процессора и геолокации",
+    "description": "One-line description of the Emulation permission category"
+  },
+  "catDesc_performance": {
+    "message": "Измерение скорости страниц и запись трассировок",
+    "description": "One-line description of the Performance permission category"
+  },
+  "catDesc_system": {
+    "message": "История браузера и разрешения сайтов",
+    "description": "One-line description of the System permission category"
+  },
+  "pairedShort": {
+    "message": "Сопряжено",
+    "description": "Short pairing state in the line under the popup header (the full text is its tooltip)"
+  },
+  "noticeUnknownServerTitle": {
+    "message": "Неизвестный сервер",
+    "description": "Notice title when the program on the bridge port could not prove it is the paired MCP server. Same words as the matching help heading"
+  },
+  "noticeUnknownServerBody": {
+    "message": "Программа на этом порту — не ваш сопряжённый сервер. Команды не выполнялись.",
+    "description": "Notice text for an unknown server: it is not the paired server and nothing was run. Keep it as short as the English; no file names or settings"
+  },
+  "noticeRepairTitle": {
+    "message": "Нужно сопряжение",
+    "description": "Notice title when this browser has to pair with the MCP server again; the notice shows the Re-pair button"
+  },
+  "noticeRepairBody": {
+    "message": "Если вы сами сбросили сервер, выполните сопряжение заново.",
+    "description": "Notice text next to the Re-pair button: pair again only if the user reset the server. One short sentence"
+  },
+  "noticeAuthFailedBody": {
+    "message": "Забудьте сопряжение, затем запустите сервер один раз с --pair.",
+    "description": "Notice text when the MCP server rejected this browser's pairing proof, next to the Forget pairing button. Keep --pair verbatim. One short sentence"
+  },
+  "noticePairClosedTitle": {
+    "message": "Сопряжение закрыто",
+    "description": "Notice title when the MCP server accepts no new pairing because it is paired with another install"
+  },
+  "noticePairClosedBody": {
+    "message": "Запустите сервер один раз с --pair.",
+    "description": "Notice text when pairing is closed. Keep --pair unchanged: it is a command-line flag. One short sentence"
+  },
+  "noticeVersionTitle": {
+    "message": "Версии не совпадают",
+    "description": "Notice title when the extension and the MCP server use different protocol versions"
+  },
+  "noticeVersionServer": {
+    "message": "Обновите MCP-сервер до версии этого расширения.",
+    "description": "Version notice text when the MCP server is the older side. One short sentence"
+  },
+  "noticeVersionExtension": {
+    "message": "Обновите это расширение до версии MCP-сервера.",
+    "description": "Version notice text when this extension is the older side. One short sentence"
+  },
+  "noticeVersionBoth": {
+    "message": "Обновите расширение и MCP-сервер до одной версии.",
+    "description": "Version notice text when it is unknown which side is older. One short sentence"
+  },
+  "noticeRejectedTitle": {
+    "message": "Расширение не распознано",
+    "description": "Notice title when the MCP server does not trust this extension's ID"
+  },
+  "noticeRejectedBody": {
+    "message": "Добавьте ID этого расширения в список доверенных на сервере.",
+    "description": "Notice text next to the Copy ID button (btnCopyId): the user adds the copied ID to the server's trusted list. One short sentence"
+  },
+  "noticeClosedTitle": {
+    "message": "Соединение закрыто",
+    "description": "Notice title when the MCP server closed the connection for another reason (the notice has no further text)"
+  },
+  "btnDetails": {
+    "message": "Подробнее",
+    "description": "Link-style button in every notice that opens the matching help section on GitHub"
+  },
+  "btnCopyId": {
+    "message": "Копировать ID",
+    "description": "Notice button that copies this extension's ID to the clipboard"
   }
 }

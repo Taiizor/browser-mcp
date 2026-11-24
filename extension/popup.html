@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
+<meta name="viewport" content="width=360" />
 <style>
   /* shadcn/zinc-dark tokens, zero-dependency */
   :root {
@@ -9,327 +10,455 @@
     --background: #09090b;
     --card: #101013;
     --card-hover: #17171c;
+    --chip: #1c1c21;
     --border: #27272a;
+    --border-strong: #3f3f46;
     --foreground: #fafafa;
     --muted: #a1a1aa;
     --muted-fg: #71717a;
     --primary: #3b82f6;
     --primary-hover: #2563eb;
+    --primary-soft: rgba(59,130,246,.15);
+    --primary-fg: #93c5fd;
     --success: #22c55e;
+    --warning: #f59e0b;
     --danger: #ef4444;
+    --danger-fg: #fca5a5;
+    --warning-fg: #fcd34d;
     --radius: 10px;
+    --mono: ui-monospace, Consolas, monospace;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { width: 360px; height: 550px; margin: 0; padding: 0; overflow: hidden !important; }
   html::-webkit-scrollbar, body::-webkit-scrollbar { display: none !important; width: 0 !important; height: 0 !important; }
   body { display: flex; flex-direction: column; font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif; background: var(--background); color: var(--foreground); font-size: 13px; line-height: 1.45; -webkit-font-smoothing: antialiased; }
+  body > * { min-width: 0; }
+  button { font: inherit; color: inherit; }
+  [hidden] { display: none !important; }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+  :focus-visible { outline: 2px solid rgba(59,130,246,.7); outline-offset: 1px; }
+  .scroll::-webkit-scrollbar { width: 6px; }
+  .scroll::-webkit-scrollbar-track { background: transparent; }
+  .scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 6px; }
+  .scroll::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
 
-  header { flex-shrink: 0; display: flex; align-items: center; gap: 10px; padding: 13px 16px 11px; border-bottom: 1px solid var(--border); background: rgba(9,9,11,.92); backdrop-filter: blur(8px); z-index: 2; }
-  header img { width: 30px; height: 30px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,.5); }
-  header .t { flex: 1; min-width: 0; }
-  header .t b { font-size: 13.5px; font-weight: 600; letter-spacing: -.01em; display: block; }
-  header .t span { font-size: 11px; color: var(--muted-fg); font-family: ui-monospace, Consolas, monospace; }
-  .badge { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 500; padding: 4px 11px; border-radius: 999px; border: 1px solid; white-space: nowrap; }
-  .badge { max-width: 140px; }
+  /* ---------- header ---------- */
+  header { position: relative; flex-shrink: 0; display: flex; align-items: center; gap: 8px; padding: 12px 10px 10px 16px; background: rgba(9,9,11,.92); z-index: 30; }
+  header img { width: 28px; height: 28px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,.5); flex-shrink: 0; }
+  header .t { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 600; letter-spacing: -.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* The status pill never shrinks or cuts its label in any locale; the title gives way first. */
+  .badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 500; padding: 3px 9px; border-radius: 999px; border: 1px solid; white-space: nowrap; flex-shrink: 0; }
   .badge .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
-  #pillTx { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .badge.on { color: #86efac; border-color: #14532d; background: rgba(34,197,94,.1); }
   .badge.on .dot { animation: pulse 2s infinite; }
-  .badge.off { color: #fca5a5; border-color: #7f1d1d; background: rgba(239,68,68,.08); }
-  .badge.wait { color: #fcd34d; border-color: #78350f; background: rgba(245,158,11,.1); }
+  .badge.off { color: var(--danger-fg); border-color: #7f1d1d; background: rgba(239,68,68,.08); }
+  .badge.wait { color: var(--warning-fg); border-color: #78350f; background: rgba(245,158,11,.1); }
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+  .icon-btn { flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 7px; border: 1px solid transparent; background: transparent; color: var(--muted); cursor: pointer; transition: background .15s, border-color .15s, color .15s; }
+  .icon-btn svg { width: 16px; height: 16px; }
+  .icon-btn:hover, .icon-btn[aria-expanded="true"] { background: var(--card-hover); border-color: var(--border); color: var(--foreground); }
 
-  .toolbar { flex-shrink: 0; display: flex; gap: 8px; padding: 10px 16px; }
-  .search { position: relative; flex: 1; }
-  .search svg { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); width: 14px; height: 14px; color: var(--muted-fg); }
-  .search input { width: 100%; background: var(--card); border: 1px solid var(--border); color: var(--foreground); border-radius: 8px; padding: 7px 10px 7px 30px; font-size: 12.5px; outline: none; transition: border-color .15s, box-shadow .15s; }
+  /* ---------- settings menu (⋯) ---------- */
+  .menu { position: absolute; top: calc(100% - 2px); right: 10px; width: 276px; max-height: calc(100vh - 58px); overflow-y: auto; overscroll-behavior: contain; background: #111114; border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 16px 32px -8px rgba(0,0,0,.75), 0 4px 10px rgba(0,0,0,.45); padding: 4px; display: flex; flex-direction: column; z-index: 40; }
+  .menu:not([hidden]) { animation: menuIn .14s cubic-bezier(.16,1,.3,1); }
+  @keyframes menuIn { from { opacity: 0; transform: translateY(-4px) scale(.98); } to { opacity: 1; transform: none; } }
+  .m-sec { padding: 8px 9px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .m-sec + .m-sec { border-top: 1px solid var(--border); }
+  .m-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+  .m-label { font-size: 11px; font-weight: 600; color: var(--muted); }
+  .m-ver { font-family: var(--mono); font-size: 10.5px; color: var(--foreground); background: var(--chip); border: 1px solid var(--border); border-radius: 4px; padding: 0 6px; white-space: nowrap; }
+  .m-sub { font-size: 10.5px; color: var(--muted-fg); }
+  .m-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .m-id { flex: 1; min-width: 0; font-family: var(--mono); font-size: 10.5px; color: var(--foreground); background: var(--chip); border: 1px solid var(--border); border-radius: 5px; padding: 3px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
+  .m-port { flex: 1; min-width: 0; background: var(--card); border: 1px solid var(--border); color: var(--foreground); border-radius: 6px; padding: 4px 8px; font-size: 12px; font-family: var(--mono); outline: none; transition: border-color .15s, box-shadow .15s; -moz-appearance: textfield; }
+  .m-port::-webkit-outer-spin-button, .m-port::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  .m-port:focus { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(59,130,246,.2); }
+  .m-port.err { border-color: var(--danger); box-shadow: 0 0 0 2px rgba(239,68,68,.25); }
+  .m-row .btn-xs { flex-shrink: 0; }
+  /* Both buttons share a row when they fit; long labels wrap to one button per row. */
+  .m-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+  .m-actions .btn-xs { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 5px 8px; }
+
+  .btn-xs { background: var(--card); border: 1px solid var(--border); color: var(--foreground); border-radius: 6px; padding: 3px 9px; font-size: 11px; font-weight: 500; cursor: pointer; white-space: nowrap; transition: background .15s, border-color .15s, color .15s; }
+  .btn-xs:hover:not(:disabled) { background: var(--card-hover); border-color: var(--border-strong); }
+  .btn-xs:active:not(:disabled) { transform: translateY(1px); }
+  .btn-xs:disabled { opacity: .55; cursor: default; }
+  .btn-xs.accent { background: var(--primary); border-color: var(--primary); color: #fff; }
+  .btn-xs.accent:hover:not(:disabled) { background: var(--primary-hover); border-color: var(--primary-hover); }
+  .btn-xs.danger { color: var(--danger-fg); border-color: #7f1d1d; background: rgba(239,68,68,.06); }
+  .btn-xs.danger:hover:not(:disabled) { background: rgba(239,68,68,.14); border-color: #991b1b; }
+
+  /* language list (inside the menu, expands in place) */
+  .lang-btn { width: 100%; display: flex; align-items: center; gap: 7px; background: var(--card); border: 1px solid var(--border); color: var(--foreground); border-radius: 6px; padding: 4px 8px; height: 28px; font-size: 12px; cursor: pointer; transition: background .15s, border-color .15s; }
+  .lang-btn:hover { background: var(--card-hover); border-color: var(--border-strong); }
+  .lang-btn[aria-expanded="true"] { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(59,130,246,.2); }
+  .lang-globe { width: 13px; height: 13px; color: var(--muted-fg); flex-shrink: 0; }
+  .lang-current { flex: 1; min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lang-arrow { width: 12px; height: 12px; color: var(--muted-fg); transition: transform .18s ease; flex-shrink: 0; }
+  .lang-btn[aria-expanded="true"] .lang-arrow { transform: rotate(180deg); color: var(--foreground); }
+  .lang-list { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 1px 2px; padding: 4px; margin-top: 2px; background: #0c0c0f; border: 1px solid var(--border); border-radius: 8px; }
+  .lang-item { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-width: 0; padding: 4px 8px; border: 0; border-radius: 5px; background: transparent; font-size: 11.5px; color: var(--muted); cursor: pointer; text-align: left; transition: background .12s, color .12s; }
+  .lang-item span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lang-item:hover { background: var(--card-hover); color: var(--foreground); }
+  .lang-item[aria-pressed="true"] { color: var(--primary-fg); font-weight: 500; background: rgba(59,130,246,.1); }
+  .lang-item .check { width: 12px; height: 12px; color: var(--primary); opacity: 0; flex-shrink: 0; }
+  .lang-item[aria-pressed="true"] .check { opacity: 1; }
+
+  /* ---------- sub-line: server version · pairing · agent tabs ---------- */
+  .sub { flex-shrink: 0; display: flex; align-items: center; gap: 6px; padding: 0 16px 9px; border-bottom: 1px solid var(--border); font-size: 11px; color: var(--muted); white-space: nowrap; min-width: 0; }
+  .sub .pdot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted-fg); flex-shrink: 0; }
+  .sub.ok .pdot { background: var(--success); }
+  .sub.wait .pdot { background: var(--warning); }
+  .sub.bad .pdot { background: var(--danger); }
+  .sub-ver { flex-shrink: 0; font-family: var(--mono); font-size: 10.5px; color: var(--foreground); }
+  .sub .sep { flex-shrink: 0; color: var(--muted-fg); }
+  .pair-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .at-text { flex-shrink: 0; color: var(--muted-fg); }
+  .at-btn { flex-shrink: 0; display: inline-flex; align-items: center; gap: 3px; background: none; border: none; padding: 0; color: var(--primary-fg); font-size: 11px; cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px; }
+  .at-btn svg { width: 11px; height: 11px; transition: transform .18s; }
+  .at-btn[aria-expanded="true"] svg { transform: rotate(180deg); }
+  .at-btn:hover { color: #bfdbfe; }
+  .at-list { flex-shrink: 0; margin: 8px 16px 0; padding: 6px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; display: flex; flex-direction: column; gap: 2px; }
+  .at-head { font-size: 10.5px; font-weight: 600; color: var(--muted-fg); padding: 1px 4px 3px; }
+  .at-items { max-height: 128px; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; }
+  .at-item { display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 7px; width: 100%; min-height: 26px; padding: 3px 6px; border: 0; border-radius: 6px; background: transparent; cursor: pointer; text-align: left; font-size: 11.5px; }
+  .at-item:hover { background: var(--card-hover); }
+  /* Drawn inside: the scrolling list would clip an outer ring. */
+  .at-item:focus-visible { outline-offset: -2px; }
+  .at-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--border-strong); }
+  .at-item.active .at-dot { background: var(--primary); }
+  .at-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .at-host { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 10px; color: var(--muted-fg); }
+
+  /* ---------- connection notice ---------- */
+  /* One problem at a time: a title, one sentence, a Details link to the matching
+     docs/pairing.md section and at most one action. The actions sit on the right
+     and move under the text when both do not fit on one row; nothing scrolls. */
+  .notice { flex-shrink: 0; margin: 8px 16px 0; padding: 8px 10px 8px 11px; border: 1px solid #7f1d1d; background: rgba(239,68,68,.08); border-radius: 8px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 11.5px; line-height: 1.4; color: var(--muted); }
+  .notice-text { flex: 1 1 170px; min-width: 0; display: flex; flex-direction: column; gap: 1px; overflow-wrap: anywhere; }
+  /* Break Korean between words and Japanese between phrases, not inside them (the html lang attribute follows the popup language). */
+  .notice-text:lang(ko), .dlg-body:lang(ko) { word-break: keep-all; }
+  .notice-text:lang(ja), .dlg-body:lang(ja) { word-break: auto-phrase; }
+  .nobr { white-space: nowrap; }
+  .notice-title { color: var(--danger-fg); font-weight: 600; font-size: 12px; }
+  .notice.warn { border-color: #78350f; background: rgba(245,158,11,.08); }
+  .notice.warn .notice-title { color: var(--warning-fg); }
+  .notice.neutral { border-color: var(--border-strong); background: var(--card); }
+  .notice.neutral .notice-title { color: var(--foreground); }
+  .notice-actions { flex-shrink: 0; margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .notice-link { background: none; border: none; padding: 2px 0; color: var(--primary-fg); font-size: 11.5px; white-space: nowrap; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+  .notice-link:hover { color: #bfdbfe; }
+
+  /* Live activity strip */
+  .activity { flex-shrink: 0; display: flex; align-items: center; gap: 5px; margin: 8px 16px 0; padding: 6px 10px; border: 1px solid rgba(59,130,246,.35); background: rgba(59,130,246,.08); border-radius: 8px; font-size: 11.5px; color: var(--muted); white-space: nowrap; min-width: 0; }
+  .act-dot { position: relative; width: 8px; height: 8px; margin-right: 3px; border-radius: 50%; background: var(--primary); flex-shrink: 0; }
+  .act-dot::after { content: ""; position: absolute; inset: -3px; border-radius: 50%; border: 2px solid var(--primary); opacity: 0; animation: ping 1.4s cubic-bezier(0,0,.2,1) infinite; }
+  @keyframes ping { 0% { transform: scale(.6); opacity: .8; } 100% { transform: scale(1.6); opacity: 0; } }
+  /* The action and the host shrink; the elapsed time and the count never do. */
+  .act-main { flex: 0 1 auto; min-width: 0; display: flex; align-items: center; gap: 5px; overflow: hidden; }
+  .act-label { flex-shrink: 0; font-weight: 600; color: var(--primary-fg); }
+  .act-action { flex: 0 1 auto; min-width: 40px; overflow: hidden; text-overflow: ellipsis; font-family: var(--mono); font-size: 11px; color: var(--foreground); }
+  .act-host { flex: 0 1 auto; min-width: 24px; overflow: hidden; text-overflow: ellipsis; }
+  .activity .sep { flex-shrink: 0; color: var(--muted-fg); }
+  .act-time { flex-shrink: 0; font-family: var(--mono); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+  .act-more { flex-shrink: 0; margin-left: auto; font-size: 10.5px; color: var(--primary-fg); background: var(--primary-soft); border: 1px solid rgba(59,130,246,.3); border-radius: 999px; padding: 0 7px; line-height: 16px; }
+
+  /* ---------- tab navigation ---------- */
+  .tab-nav { flex-shrink: 0; display: flex; border-bottom: 1px solid var(--border); padding: 0 16px; gap: 6px; margin-top: 6px; }
+  .tab-nav-btn { flex: 1; min-width: 0; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 8px; background: transparent; border: none; border-bottom: 2px solid transparent; color: var(--muted-fg); font-size: 12px; font-weight: 500; cursor: pointer; transition: color .15s, border-color .15s; }
+  .tab-nav-btn > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tab-nav-btn:hover { color: var(--foreground); }
+  .tab-nav-btn[aria-selected="true"] { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
+  .nav-badge { flex-shrink: 0; background: var(--chip); border: 1px solid var(--border); color: var(--muted-fg); font-size: 10px; padding: 0 6px; border-radius: 999px; line-height: 16px; font-variant-numeric: tabular-nums; font-weight: 500; }
+  .tab-nav-btn[aria-selected="true"] .nav-badge { background: var(--primary-soft); border-color: rgba(59,130,246,.3); color: var(--primary-fg); }
+  .tab-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+
+  /* ---------- permissions pane ---------- */
+  .profiles { flex-shrink: 0; padding: 10px 16px 0; }
+  /* Equal columns; a label longer than its share widens its own column instead of being cut. */
+  .seg { display: grid; grid-template-columns: repeat(4, minmax(min-content,1fr)); gap: 2px; padding: 3px; background: var(--card); border: 1px solid var(--border); border-radius: 9px; }
+  .seg button { min-width: 0; padding: 5px 4px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 12px; font-weight: 500; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; transition: background .15s, color .15s, box-shadow .15s; }
+  .seg button:hover:not([aria-disabled="true"]):not([aria-checked="true"]) { background: var(--card-hover); color: var(--foreground); }
+  .seg button[aria-checked="true"] { background: var(--primary-soft); color: #bfdbfe; box-shadow: inset 0 0 0 1px rgba(59,130,246,.45); font-weight: 600; }
+  .seg button[aria-disabled="true"] { cursor: default; }
+  .seg button[aria-disabled="true"]:not([aria-checked="true"]) { color: var(--muted-fg); opacity: .7; }
+  .profile-desc { min-height: 30px; padding: 5px 2px 0; font-size: 11px; line-height: 1.38; color: var(--muted-fg); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .toolbar { flex-shrink: 0; display: flex; gap: 8px; padding: 8px 16px 6px; }
+  .search { position: relative; flex: 1; min-width: 0; }
+  .search svg { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); width: 14px; height: 14px; color: var(--muted-fg); pointer-events: none; }
+  .search input { width: 100%; background: var(--card); border: 1px solid var(--border); color: var(--foreground); border-radius: 8px; padding: 6px 10px 6px 30px; font-size: 12.5px; outline: none; transition: border-color .15s, box-shadow .15s; }
   .search input::placeholder { color: var(--muted-fg); }
   .search input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(59,130,246,.18); }
-  .btn { background: var(--card); border: 1px solid var(--border); color: var(--foreground); border-radius: 8px; padding: 7px 13px; font-size: 12.5px; font-weight: 500; cursor: pointer; transition: background .15s, border-color .15s; white-space: nowrap; }
-  .btn:hover { background: var(--card-hover); border-color: #3f3f46; }
-  .btn:active { transform: translateY(1px); }
+  .perm-note { flex-shrink: 0; padding: 0 16px 8px; font-size: 10.5px; line-height: 1.4; color: var(--muted-fg); }
 
-  #cats { flex: 1; min-height: 0; padding: 2px 16px 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
-  #cats::-webkit-scrollbar { width: 6px; }
-  #cats::-webkit-scrollbar-track { background: transparent; }
-  #cats::-webkit-scrollbar-thumb { background: #27272a; border-radius: 6px; }
-  #cats::-webkit-scrollbar-thumb:hover { background: #3f3f46; }
+  /* The list never collapses (problem notices take room above it): the pane scrolls instead. */
+  #panePerms { overflow-y: auto; }
+  #cats { flex: 1; min-height: 100px; padding: 0 16px 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
   .cat { flex-shrink: 0; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; transition: border-color .15s; }
-  .cat:hover { border-color: #3f3f46; }
-  .cat.open { border-color: #3f3f46; }
-  .cat-h { display: grid; grid-template-columns: minmax(0,1fr) auto auto auto; align-items: center; gap: 8px; padding: 10px 12px; min-height: 44px; cursor: pointer; user-select: none; }
+  .cat:hover, .cat.open { border-color: var(--border-strong); }
+  .cat-h { display: grid; grid-template-columns: minmax(0,1fr) auto auto auto; align-items: center; gap: 9px; padding: 8px 10px 8px 12px; min-height: 46px; cursor: pointer; user-select: none; }
   .cat-h:hover { background: var(--card-hover); }
-  .cat-h .nm { min-width: 0; font-weight: 500; font-size: 13px; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; transform: translateY(2px); }
-  .cat-h .ct { font-size: 11px; color: var(--muted-fg); font-variant-numeric: tabular-nums; background: #1c1c21; border: 1px solid var(--border); padding: 0 7px; border-radius: 999px; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center; height: 20px; line-height: 1; }
-  .cat-h .arr { color: var(--muted-fg); transition: transform .18s; display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; }
-  .cat-h .arr svg { width: 14px; height: 14px; display: block; }
+  .cat-main { min-width: 0; display: flex; flex-direction: column; gap: 1px; padding: 0; border: 0; background: none; text-align: left; cursor: pointer; }
+  .cat-main:focus-visible { outline-offset: 3px; border-radius: 4px; }
+  .cat-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .cat-row .nm { min-width: 0; font-weight: 500; font-size: 13px; line-height: 1.35; overflow: hidden; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  .risk { flex-shrink: 0; font-size: 9.5px; font-weight: 600; line-height: 15px; color: var(--danger-fg); background: rgba(239,68,68,.1); border: 1px solid rgba(239,68,68,.35); border-radius: 4px; padding: 0 5px; white-space: nowrap; }
+  .cat-desc { min-width: 0; font-size: 11px; line-height: 1.35; color: var(--muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ct { font-size: 11px; color: var(--muted-fg); font-variant-numeric: tabular-nums; background: var(--chip); border: 1px solid var(--border); padding: 0 7px; border-radius: 999px; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center; height: 20px; line-height: 1; }
+  .arr { color: var(--muted-fg); transition: transform .18s; display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; }
+  .arr svg { width: 14px; height: 14px; display: block; }
   .cat.open .arr { transform: rotate(90deg); color: var(--foreground); }
-  .tools { display: none; border-top: 1px solid var(--border); padding: 6px; background: rgba(0,0,0,.15); }
-  .cat.open .tools { display: flex; flex-direction: column; gap: 2px; }
-  .tool { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 10px; min-height: 32px; padding: 5px 8px; border-radius: 7px; }
+  .tools { display: none; border-top: 1px solid var(--border); padding: 5px; background: rgba(0,0,0,.15); }
+  .cat.open .tools { display: flex; flex-direction: column; gap: 1px; }
+  .tool { display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 4px 6px 4px 8px; border-radius: 7px; }
   .tool:hover { background: var(--card-hover); }
-  .tool code { min-width: 0; font-size: 12px; font-family: ui-monospace, Consolas, monospace; color: var(--foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tool code { flex: 1; min-width: 0; font-size: 12px; font-family: var(--mono); color: var(--foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tool.off code { color: var(--muted-fg); }
+  .agent-off { flex-shrink: 0; font-size: 10px; line-height: 16px; color: var(--warning-fg); background: rgba(245,158,11,.1); border: 1px solid rgba(245,158,11,.35); border-radius: 999px; padding: 0 7px; white-space: nowrap; cursor: help; }
+  .empty { padding: 22px; text-align: center; color: var(--muted-fg); font-size: 12.5px; }
 
   /* shadcn Switch */
-  .sw { display: block; position: relative; width: 36px; min-width: 36px; height: 20px; min-height: 20px; cursor: pointer; }
+  .sw { display: block; position: relative; flex-shrink: 0; width: 36px; min-width: 36px; height: 20px; min-height: 20px; cursor: pointer; }
   .sw input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
-  .sw i { position: absolute; inset: 0; background: #3f3f46; border-radius: 999px; transition: background .18s; pointer-events: none; overflow: hidden; }
+  .sw i { position: absolute; inset: 0; background: var(--border-strong); border-radius: 999px; transition: background .18s; pointer-events: none; overflow: hidden; }
   .sw i::after { content: ""; position: absolute; width: 14px; height: 14px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: transform .18s; box-shadow: 0 1px 3px rgba(0,0,0,.4); }
   .sw input:checked + i { background: var(--primary); }
   .sw input:checked + i::after { transform: translateX(16px); }
-  .sw input:focus-visible + i { box-shadow: 0 0 0 3px rgba(59,130,246,.3); }
-  .cat-h .sw { pointer-events: none; }
-  .cat-h .sw input { pointer-events: auto; }
-  footer { position: relative; z-index: 10; padding: 8px 16px 10px; font-size: 11.5px; color: var(--muted-fg); border-top: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 8px; background: rgba(9,9,11,.92); }
-  .port-row { display: inline-flex; align-items: center; gap: 6px; }
-  .port-row .fdot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); flex-shrink: 0; }
-  .port-row label { font-weight: 500; color: var(--muted); font-size: 11px; cursor: pointer; }
-  .port-row input { width: 58px; background: var(--card); border: 1px solid var(--border); color: var(--foreground); border-radius: 6px; padding: 3px 6px; font-size: 11.5px; font-family: ui-monospace, Consolas, monospace; outline: none; transition: border-color .15s, box-shadow .15s; -moz-appearance: textfield; }
-  .port-row input::-webkit-outer-spin-button, .port-row input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-  .port-row input:focus { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(59,130,246,.2); }
-  .port-row input.err { border-color: var(--danger); box-shadow: 0 0 0 2px rgba(239,68,68,.25); }
-  .btn-xs { background: var(--card); border: 1px solid var(--border); color: var(--foreground); border-radius: 6px; padding: 3px 8px; font-size: 11px; font-weight: 500; cursor: pointer; transition: background .15s, border-color .15s, transform .05s; }
-  .btn-xs:hover { background: var(--card-hover); border-color: #3f3f46; }
-  .btn-xs:active { transform: translateY(1px); }
-  .btn-xs:disabled { opacity: .6; cursor: default; transform: none; }
-  .btn-xs.accent { background: var(--primary); border-color: var(--primary); color: #fff; }
-  .btn-xs.accent:hover:not(:disabled) { background: var(--primary-hover); border-color: var(--primary-hover); }
-  .f-info { font-size: 10.5px; color: var(--muted-fg); white-space: nowrap; }
-  /* Custom Shadcn-style Language Dropdown */
-  .lang-dropdown { position: relative; }
-  .lang-btn { display: inline-flex; align-items: center; gap: 5px; background: var(--card); border: 1px solid var(--border); color: var(--foreground); border-radius: 6px; padding: 3px 8px; height: 24px; font-size: 11px; font-weight: 500; cursor: pointer; transition: background .15s, border-color .15s, color .15s, box-shadow .15s; user-select: none; outline: none; }
-  .lang-btn:hover { background: var(--card-hover); border-color: #3f3f46; }
-  .lang-btn:focus-visible, .lang-btn.open { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(59,130,246,.2); }
-  .lang-globe { width: 12px; height: 12px; color: var(--muted-fg); flex-shrink: 0; }
-  .lang-current { font-size: 11px; color: var(--foreground); white-space: nowrap; max-width: 65px; overflow: hidden; text-overflow: ellipsis; }
-  .lang-arrow { width: 11px; height: 11px; color: var(--muted-fg); transition: transform .18s ease; flex-shrink: 0; }
-  .lang-btn.open .lang-arrow { transform: rotate(180deg); color: var(--foreground); }
+  .sw input:indeterminate + i { background: #1e3a8a; }
+  .sw input:indeterminate + i::after { transform: translateX(8px); }
+  .sw input:focus-visible + i { box-shadow: 0 0 0 3px rgba(59,130,246,.35); }
+  .cat.high .sw input:checked + i { background: #dc2626; }
 
-  .lang-menu { position: absolute; bottom: calc(100% + 6px); right: 0; width: 140px; max-height: 220px; overflow-y: auto; background: #111114; border: 1px solid var(--border); border-radius: 8px; padding: 4px; box-shadow: 0 10px 25px -5px rgba(0,0,0,.6), 0 8px 10px -6px rgba(0,0,0,.5); display: none; flex-direction: column; gap: 1px; z-index: 100; backdrop-filter: blur(12px); }
-  .lang-menu::-webkit-scrollbar { width: 4px; }
-  .lang-menu::-webkit-scrollbar-track { background: transparent; }
-  .lang-menu::-webkit-scrollbar-thumb { background: #27272a; border-radius: 4px; }
-  .lang-menu::-webkit-scrollbar-thumb:hover { background: #3f3f46; }
-  .lang-menu.show { display: flex; animation: menuIn .14s cubic-bezier(0.16, 1, 0.3, 1); }
-  @keyframes menuIn { from { opacity: 0; transform: translateY(4px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
-
-  .lang-item { display: flex; align-items: center; justify-content: space-between; padding: 5px 8px; border-radius: 5px; font-size: 11.5px; color: var(--muted); cursor: pointer; user-select: none; transition: background .12s, color .12s; }
-  .lang-item:hover { background: var(--card-hover); color: var(--foreground); }
-  .lang-item.selected { color: #93c5fd; font-weight: 500; background: rgba(59,130,246,.1); }
-  .lang-item .check { width: 12px; height: 12px; color: var(--primary); opacity: 0; flex-shrink: 0; }
-  .lang-item.selected .check { opacity: 1; }
-  .empty { padding: 22px; text-align: center; color: var(--muted-fg); font-size: 12.5px; }
-
-  /* Active tab bar */
-  .active-bar { flex-shrink: 0; display: flex; align-items: center; gap: 6px; padding: 5px 16px; background: rgba(255,255,255,.03); border-bottom: 1px solid var(--border); font-size: 11px; }
-  .active-tag { background: #1c1c21; border: 1px solid var(--border); color: var(--muted); padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 500; white-space: nowrap; }
-  .active-title { color: var(--foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; font-family: ui-monospace, Consolas, monospace; }
-
-  /* Segmented Tab Navigation */
-  .tab-nav { flex-shrink: 0; display: flex; background: #09090b; border-bottom: 1px solid var(--border); padding: 0 16px; gap: 6px; }
-  .tab-nav-btn { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 9px 8px; background: transparent; border: none; border-bottom: 2px solid transparent; color: var(--muted-fg); font-size: 12px; font-weight: 500; cursor: pointer; transition: color .15s, border-color .15s; }
-  .tab-nav-btn:hover { color: var(--foreground); }
-  .tab-nav-btn.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
-  .nav-badge { background: #1c1c21; border: 1px solid var(--border); color: var(--muted-fg); font-size: 10px; padding: 0 6px; border-radius: 999px; line-height: 16px; font-variant-numeric: tabular-nums; }
-  .tab-nav-btn.active .nav-badge { background: rgba(59,130,246,.15); border-color: rgba(59,130,246,.3); color: #93c5fd; }
-
-  .tab-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
-  .tab-pane.hidden { display: none !important; }
-
-  /* History pane */
-  #paneHistory { flex: 1; min-height: 0; padding: 10px 16px 12px; overflow: hidden; display: flex; flex-direction: column; gap: 8px; }
-  .hist-toolbar { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; padding: 2px 2px 4px; font-size: 11px; color: var(--muted-fg); }
+  /* ---------- history pane ---------- */
+  #paneHistory { padding: 10px 16px 0; gap: 8px; }
+  .hist-toolbar { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .chips { display: inline-flex; gap: 2px; padding: 2px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; min-width: 0; }
+  .chip { display: inline-flex; align-items: center; gap: 5px; min-width: 0; padding: 3px 10px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 11.5px; font-weight: 500; cursor: pointer; white-space: nowrap; transition: background .15s, color .15s; }
+  .chip:hover { color: var(--foreground); }
+  .chip[aria-pressed="true"] { background: var(--primary-soft); color: var(--primary-fg); }
+  .chip-count { font-size: 10px; line-height: 14px; font-variant-numeric: tabular-nums; color: var(--danger-fg); background: rgba(239,68,68,.12); border-radius: 999px; padding: 0 5px; }
+  #histList { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 0 2px 12px 0; }
   .hist-empty { padding: 36px 16px; text-align: center; color: var(--muted-fg); font-size: 12.5px; }
-  #histList { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding-right: 2px; }
-  #histList::-webkit-scrollbar { width: 6px; }
-  #histList::-webkit-scrollbar-track { background: transparent; }
-  #histList::-webkit-scrollbar-thumb { background: #27272a; border-radius: 6px; }
-  #histList::-webkit-scrollbar-thumb:hover { background: #3f3f46; }
+  .h-group { display: flex; flex-direction: column; gap: 4px; }
+  .h-group-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 6px; padding: 2px 2px 3px; background: var(--background); font-size: 11px; min-width: 0; }
+  .h-host { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--foreground); }
+  .h-host.unknown { font-weight: 500; color: var(--muted-fg); font-style: italic; }
+  .h-count { flex-shrink: 0; font-size: 10px; line-height: 15px; padding: 0 6px; border-radius: 999px; color: var(--muted-fg); background: var(--chip); border: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+  .h-entry { background: var(--card); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; transition: border-color .15s; }
+  .h-entry:hover { border-color: var(--border-strong); }
+  .h-entry.err { border-color: rgba(239,68,68,.3); background: rgba(239,68,68,.04); }
+  .h-row { width: 100%; display: grid; grid-template-columns: auto minmax(0,1fr) auto auto; align-items: center; gap: 8px; padding: 6px 10px; border: 0; background: none; text-align: left; cursor: pointer; }
+  /* Drawn inside: the entry (overflow hidden) would clip an outer ring. */
+  .h-row:focus-visible { outline-offset: -2px; border-radius: 7px; }
+  .h-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); }
+  .h-entry.err .h-dot { background: var(--danger); }
+  .h-main { min-width: 0; display: flex; flex-direction: column; }
+  .h-action { min-width: 0; font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--primary-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .h-entry.err .h-action { color: var(--danger-fg); }
+  .h-detail { min-width: 0; font-size: 10.5px; color: var(--muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .h-dur, .h-time { font-family: var(--mono); font-size: 10px; color: var(--muted-fg); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .h-more { display: flex; flex-direction: column; gap: 5px; padding: 6px 10px 8px; border-top: 1px solid var(--border); font-size: 10.5px; color: var(--muted); }
+  .h-err { color: var(--danger-fg); background: rgba(239,68,68,.1); padding: 4px 6px; border-radius: 4px; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+  .h-meta { display: flex; flex-wrap: wrap; gap: 6px; }
+  .h-badge { background: var(--chip); border: 1px solid var(--border); padding: 0 5px; border-radius: 4px; font-family: var(--mono); font-size: 10px; line-height: 16px; }
+  .h-full { overflow-wrap: anywhere; font-family: var(--mono); user-select: text; }
 
-  .audit-card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 5px; transition: border-color .15s; }
-  .audit-card:hover { border-color: #3f3f46; }
-  .audit-card.err { border-color: rgba(239,68,68,.3); background: rgba(239,68,68,.04); }
-  .audit-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-  .audit-name { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
-  .audit-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); flex-shrink: 0; }
-  .audit-card.err .audit-dot { background: var(--danger); }
-  .audit-name code { font-size: 12px; font-weight: 600; font-family: ui-monospace, Consolas, monospace; color: #93c5fd; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .audit-card.err .audit-name code { color: #fca5a5; }
-  .audit-time { font-size: 10px; color: var(--muted-fg); font-family: ui-monospace, Consolas, monospace; white-space: nowrap; }
-  .audit-meta-row { display: flex; align-items: center; gap: 6px; font-size: 10px; color: var(--muted-fg); }
-  .audit-badge { background: #1c1c21; border: 1px solid var(--border); padding: 1px 5px; border-radius: 4px; font-family: ui-monospace, Consolas, monospace; }
-  .audit-err-msg { font-size: 10.5px; color: #fca5a5; background: rgba(239,68,68,.1); padding: 4px 6px; border-radius: 4px; margin-top: 2px; word-break: break-all; }
+  /* ---------- footer ---------- */
+  footer { flex-shrink: 0; padding: 10px 16px 12px; border-top: 1px solid var(--border); background: rgba(9,9,11,.92); }
+  .btn-stop { width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 8px 12px; border-radius: 8px; border: 1px solid #7f1d1d; background: rgba(239,68,68,.12); color: #fecaca; font-size: 12.5px; font-weight: 600; cursor: pointer; transition: background .15s, border-color .15s, color .15s; }
+  .btn-stop svg { width: 14px; height: 14px; flex-shrink: 0; }
+  .btn-stop span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .btn-stop:hover:not(:disabled) { background: rgba(239,68,68,.22); border-color: #b91c1c; color: #fff; }
+  .btn-stop:active:not(:disabled) { transform: translateY(1px); }
+  .btn-stop:disabled { cursor: default; opacity: .7; }
+  .btn-stop.done { border-color: #14532d; background: rgba(34,197,94,.1); color: #86efac; }
 
-  [hidden] { display: none !important; }
+  /* ---------- confirm dialog ---------- */
+  /* Centered in the 360 px popup (not the viewport, which can be wider while the popup opens). */
+  .dlg { inset: 0 auto 0 0; margin: auto 0 auto 28px; width: 304px; max-width: 304px; max-height: calc(100vh - 32px); padding: 16px; background: #111114; color: var(--foreground); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 24px 48px -12px rgba(0,0,0,.8); }
+  .dlg[open] { display: flex; flex-direction: column; gap: 10px; }
+  .dlg:modal { overscroll-behavior: contain; }
+  .dlg::backdrop { background: rgba(0,0,0,.62); overflow: hidden; overscroll-behavior: contain; }
+  .dlg-title { font-size: 14px; font-weight: 600; line-height: 1.35; }
+  .dlg-body { font-size: 12px; line-height: 1.5; color: var(--muted); overflow-wrap: anywhere; }
+  .dlg-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+  .btn { background: var(--card); border: 1px solid var(--border); color: var(--foreground); border-radius: 8px; padding: 6px 14px; font-size: 12.5px; font-weight: 500; cursor: pointer; white-space: nowrap; transition: background .15s, border-color .15s; }
+  .btn:hover { background: var(--card-hover); border-color: var(--border-strong); }
+  .btn.danger { background: #b91c1c; border-color: #b91c1c; color: #fff; }
+  .btn.danger:hover { background: #dc2626; border-color: #dc2626; }
 
-  /* Connection notice (server closed the socket, e.g. untrusted extension id) */
-  .notice { flex-shrink: 0; max-height: 230px; overflow-y: auto; margin: 10px 16px 0; padding: 9px 11px; border: 1px solid #7f1d1d; background: rgba(239,68,68,.08); border-radius: 8px; display: flex; flex-direction: column; gap: 6px; font-size: 11.5px; color: var(--muted); }
-  .notice-title { color: #fca5a5; font-weight: 600; font-size: 12px; }
-  .notice.warn { border-color: #78350f; background: rgba(245,158,11,.08); }
-  .notice.warn .notice-title { color: #fcd34d; }
-  .notice-actions { display: flex; gap: 6px; }
-  .notice-help { display: flex; flex-direction: column; gap: 6px; }
-  .notice-step { display: flex; flex-direction: column; gap: 3px; }
-  .notice code { font-family: ui-monospace, Consolas, monospace; font-size: 10.5px; color: var(--foreground); background: #1c1c21; border: 1px solid var(--border); border-radius: 4px; padding: 2px 5px; word-break: break-all; user-select: text; }
-  .notice-id { display: flex; align-items: center; gap: 6px; }
-  .notice-id > span { white-space: nowrap; }
-  .notice-id code { flex: 1; min-width: 0; }
+  /* ---------- tooltip (#tip) ---------- */
+  /* The one tooltip of the popup (popup.js "tooltip"): [data-tip] texts and the full text
+     of a cut [data-tip-overflow] element. It opens in the top layer (popover="manual"),
+     above the menu and the open dialog; without the Popover API it is a fixed element
+     whose z-index tops everything else. It takes no pointer event (a click on it reaches
+     the control under it); popup.js keeps it open while the pointer is on its box. popup.js
+     sets left/top, the side (data-side) and the arrow offset (--tip-arrow-x). */
+  .tip { position: fixed; inset: auto; left: 0; top: 0; z-index: 2147483647; margin: 0; width: max-content; max-width: 240px; padding: 6px 8px; overflow: visible; background: var(--chip); color: var(--foreground); border: 1px solid var(--border-strong); border-radius: 7px; box-shadow: 0 10px 24px -6px rgba(0,0,0,.7), 0 2px 6px rgba(0,0,0,.45); font-family: inherit; font-size: 11.5px; font-weight: 450; line-height: 1.4; letter-spacing: 0; text-align: left; white-space: pre-line; overflow-wrap: anywhere; pointer-events: none; display: none; }
+  .tip.show { display: block; animation: tipIn .12s cubic-bezier(.16,1,.3,1); }
+  .tip::before { content: ""; position: absolute; left: var(--tip-arrow-x, 50%); width: 8px; height: 8px; margin-left: -4px; background: inherit; border: 1px solid var(--border-strong); transform: rotate(45deg); }
+  .tip[data-side="below"] { transform-origin: var(--tip-arrow-x, 50%) top; }
+  .tip[data-side="below"]::before { top: -5px; border-width: 1px 0 0 1px; }
+  .tip[data-side="above"] { --tip-from: 3px; transform-origin: var(--tip-arrow-x, 50%) bottom; }
+  .tip[data-side="above"]::before { bottom: -5px; border-width: 0 1px 1px 0; }
+  @keyframes tipIn { from { opacity: 0; transform: translateY(var(--tip-from, -3px)) scale(.96); } to { opacity: 1; transform: none; } }
 
-  /* Pairing status line under the header (bridge protocol v3) */
-  .pair-bar { flex-shrink: 0; display: flex; align-items: center; gap: 6px; padding: 5px 16px; border-bottom: 1px solid var(--border); font-size: 11px; color: var(--muted); }
-  .pair-bar .pdot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted-fg); flex-shrink: 0; }
-  .pair-bar.ok .pdot { background: var(--success); }
-  .pair-bar.wait .pdot { background: #f59e0b; }
-  .pair-bar.bad .pdot { background: var(--danger); }
-  .pair-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .pair-ver { flex-shrink: 0; background: #1c1c21; border: 1px solid var(--border); padding: 0 5px; border-radius: 4px; font-size: 10px; font-family: ui-monospace, Consolas, monospace; color: var(--foreground); white-space: nowrap; }
-  .link-btn { margin-left: auto; flex-shrink: 0; background: none; border: none; padding: 0; color: var(--muted-fg); font: inherit; font-size: 10.5px; text-decoration: underline dotted; text-underline-offset: 2px; cursor: pointer; white-space: nowrap; }
-  .link-btn:hover, .link-btn:focus-visible { color: var(--foreground); outline: none; }
-  .link-btn.armed { color: #fca5a5; text-decoration-style: solid; }
-
-  /* Permission hint under the search bar */
-  .perm-note { flex-shrink: 0; padding: 0 16px 8px; font-size: 10.5px; line-height: 1.4; color: var(--muted-fg); }
+  @media (prefers-reduced-motion: reduce) {
+    .act-dot::after, .badge.on .dot, .menu:not([hidden]), .tip.show { animation: none !important; }
+    .act-dot::after { opacity: 0; }
+    * { transition-duration: 0s !important; }
+  }
 </style>
 </head>
 <body>
 <header>
   <img src="icons/icon.svg" alt="" />
-  <div class="t"><b data-i18n="extName">Browser MCP Bridge</b><span id="ver"></span></div>
-  <div id="pill" class="badge off"><span class="dot"></span><span id="pillTx">…</span></div>
+  <div class="t" data-i18n="actionTitle" data-i18n-tip="extName" data-tip="Browser MCP Bridge">Browser MCP</div>
+  <div id="pill" class="badge off" role="status"><span class="dot"></span><span id="pillTx" data-tip-overflow>…</span></div>
+  <button id="menuBtn" type="button" class="icon-btn" aria-expanded="false" aria-controls="menu" data-i18n-aria="menuTitle" data-i18n-tip="menuTitle" aria-label="More" data-tip="More">
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+  </button>
+  <div id="menu" class="menu scroll" role="group" aria-labelledby="menuBtn" hidden>
+    <section class="m-sec">
+      <div class="m-head"><span class="m-label" data-i18n="menuExtension">Extension</span><span id="menuVer" class="m-ver"></span></div>
+      <span class="m-sub" data-i18n="extensionIdLabel">Extension ID</span>
+      <div class="m-row">
+        <code id="menuExtId" class="m-id" data-tip-overflow></code>
+        <button id="menuCopyId" type="button" class="btn-xs" data-i18n="btnCopy">Copy</button>
+      </div>
+    </section>
+    <section class="m-sec">
+      <label class="m-label" for="portInput" data-i18n="menuPort">Bridge port</label>
+      <div class="m-row">
+        <input id="portInput" class="m-port" type="number" min="1024" max="65535" value="8765" />
+        <button id="portSave" type="button" class="btn-xs accent" data-i18n="portSaveBtn" data-i18n-tip="portSaveTitle" data-tip="Apply Port &amp; Reconnect">Set</button>
+        <button id="portReset" type="button" class="btn-xs" data-i18n-tip="portResetTitle" data-i18n-aria="portResetTitle" data-tip="Reset to default 8765" aria-label="Reset to default 8765">↺</button>
+      </div>
+    </section>
+    <section class="m-sec" id="langDropdown">
+      <span id="langLabel" class="m-label" data-i18n="menuLanguage">Language</span>
+      <button id="langBtn" type="button" class="lang-btn" aria-expanded="false" aria-controls="langMenu" aria-labelledby="langLabel langCurrentText" data-i18n-tip="langSelectTitle" data-tip="Language">
+        <svg class="lang-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
+        <span id="langCurrentText" class="lang-current" data-tip-overflow>Auto</span>
+        <svg class="lang-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
+      <div id="langMenu" class="lang-list" role="group" aria-labelledby="langLabel" hidden>
+        <button type="button" class="lang-item" data-val="auto" aria-pressed="false"><span data-i18n="langAuto">Auto</span><svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></button>
+        <button type="button" class="lang-item" data-val="en" lang="en" aria-pressed="false"><span>English</span><svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></button>
+        <button type="button" class="lang-item" data-val="tr" lang="tr" aria-pressed="false"><span>Türkçe</span><svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></button>
+        <button type="button" class="lang-item" data-val="es" lang="es" aria-pressed="false"><span>Español</span><svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></button>
+        <button type="button" class="lang-item" data-val="de" lang="de" aria-pressed="false"><span>Deutsch</span><svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></button>
+        <button type="button" class="lang-item" data-val="fr" lang="fr" aria-pressed="false"><span>Français</span><svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></button>
+        <button type="button" class="lang-item" data-val="pt_BR" lang="pt-BR" aria-pressed="false"><span>Português</span><svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></button>
+        <button type="button" class="lang-item" data-val="it" lang="it" aria-pressed="false"><span>Italiano</span><svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></button>
+        <button type="button" class="lang-item" data-val="ru" lang="ru" aria-pressed="false"><span>Русский</span><svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></button>
+        <button type="button" class="lang-item" data-val="ja" lang="ja" aria-pressed="false"><span>日本語</span><svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></button>
+        <button type="button" class="lang-item" data-val="ko" lang="ko" aria-pressed="false"><span>한국어</span><svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></button>
+      </div>
+    </section>
+    <section class="m-sec">
+      <span class="m-label" data-i18n="menuPairing">Pairing</span>
+      <div class="m-actions">
+        <button id="menuRepair" type="button" class="btn-xs" data-i18n="btnRepair" data-i18n-tip="repairTitle" data-tip="Accept the server's next pairing offer (for 2 minutes) and reconnect now">Re-pair</button>
+        <button id="forgetPair" type="button" class="btn-xs danger" data-i18n="btnForgetPairing" data-i18n-tip="forgetPairingTitle" data-tip="Delete this browser's pairing key and reconnect. The next MCP server that offers pairing will be trusted automatically.">Forget pairing</button>
+      </div>
+    </section>
+  </div>
 </header>
-<div id="pairBar" class="pair-bar" hidden>
-  <span class="pdot"></span>
-  <span id="pairText" class="pair-text"></span>
-  <span id="pairVer" class="pair-ver" hidden></span>
-  <button id="forgetPair" type="button" class="link-btn" data-i18n="btnForgetPairing" data-i18n-title="forgetPairingTitle" title="Delete this browser's pairing key and reconnect. The next MCP server that offers pairing will be trusted automatically." hidden>Forget pairing</button>
+<div id="subLine" class="sub">
+  <span class="pdot" aria-hidden="true"></span>
+  <span id="subVer" class="sub-ver" hidden></span>
+  <span id="sepVer" class="sep" aria-hidden="true" hidden>·</span>
+  <span id="pairText" class="pair-text" data-tip-overflow hidden></span>
+  <span id="sepPair" class="sep" aria-hidden="true" hidden>·</span>
+  <span id="agentTabsText" class="at-text"></span>
+  <button id="agentTabsBtn" type="button" class="at-btn" aria-expanded="false" aria-controls="agentTabsList" hidden>
+    <span id="agentTabsBtnTx"></span>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+  </button>
+</div>
+<div id="agentTabsList" class="at-list" hidden>
+  <div id="agentTabsHead" class="at-head" data-i18n="agentTabsTitle">Tabs the agent works in</div>
+  <div id="agentTabsItems" class="at-items scroll" role="group" aria-labelledby="agentTabsHead"></div>
 </div>
 <div id="trustBox" class="notice" role="alert" hidden>
-  <div id="noticeTitle" class="notice-title"></div>
-  <div id="noticeBody" hidden></div>
-  <div id="noticeKeys" class="notice-step" hidden>
-    <span data-i18n="pairKeysFileLabel">Pairing file (default server config directory):</span>
-    <code>~/.browser-mcp/extension-keys.json</code>
+  <div class="notice-text">
+    <div id="noticeTitle" class="notice-title"></div>
+    <div id="noticeBody" hidden></div>
   </div>
-  <div id="trustHelp" class="notice-help" hidden>
-    <div data-i18n="trustRejectedBody">This extension ID is not on the server's trusted list. Do one of the following, then restart the MCP server:</div>
-    <div class="notice-step">
-      <span data-i18n="trustOptEnv">Set this environment variable for the MCP server:</span>
-      <code id="trustEnv"></code>
-    </div>
-    <div class="notice-step">
-      <span data-i18n="trustOptReset">Or delete this file to pair again with the next extension that connects:</span>
-      <code>~/.browser-mcp/trusted-extensions.json</code>
-    </div>
-  </div>
-  <code id="closeInfo" hidden></code>
-  <div id="trustIdRow" class="notice-id" hidden>
-    <span data-i18n="extensionIdLabel">Extension ID</span>
-    <code id="extId"></code>
-    <button id="copyId" type="button" class="btn-xs" data-i18n="btnCopy">Copy</button>
-  </div>
-  <div id="noticeActions" class="notice-actions" hidden>
-    <button id="repairBtn" type="button" class="btn-xs accent" data-i18n="btnRepair" data-i18n-title="repairTitle" title="Accept the server's next pairing offer (for 2 minutes) and reconnect now">Re-pair</button>
+  <div class="notice-actions">
+    <button id="noticeDetails" type="button" class="notice-link" data-i18n="btnDetails">Details</button>
+    <button id="copyId" type="button" class="btn-xs accent" data-i18n="btnCopyId" hidden>Copy ID</button>
+    <button id="noticeForget" type="button" class="btn-xs accent" data-i18n="btnForgetPairing" data-i18n-tip="forgetPairingTitle" data-tip="Delete this browser's pairing key and reconnect. The next MCP server that offers pairing will be trusted automatically." hidden>Forget pairing</button>
+    <button id="repairBtn" type="button" class="btn-xs accent" data-i18n="btnRepair" data-i18n-tip="repairTitle" data-tip="Accept the server's next pairing offer (for 2 minutes) and reconnect now" hidden>Re-pair</button>
   </div>
 </div>
-<div id="activeBar" class="active-bar" style="display:none">
-  <span id="activeTag" class="active-tag" data-i18n="activeTabTag">🌐 Tab</span>
-  <span id="activeTitle" class="active-title">…</span>
+<div id="activity" class="activity" hidden>
+  <span class="act-dot" aria-hidden="true"></span>
+  <span class="act-main">
+    <span id="actLabel" class="act-label"></span>
+    <code id="actAction" class="act-action" data-tip-overflow></code>
+    <span id="actHostSep" class="sep" aria-hidden="true">·</span>
+    <span id="actHost" class="act-host" data-tip-overflow></span>
+  </span>
+  <span class="sep" aria-hidden="true">·</span>
+  <span id="actTime" class="act-time"></span>
+  <span id="actMore" class="act-more" hidden></span>
 </div>
-<div class="tab-nav">
-  <button id="navPerms" class="tab-nav-btn active">
-    <span data-i18n="tabPermissions">Permissions</span>
+<div class="tab-nav" role="tablist">
+  <button id="navPerms" type="button" class="tab-nav-btn" role="tab" aria-selected="true" aria-controls="panePerms">
+    <span data-i18n="tabPermissions" data-tip-overflow>Permissions</span>
   </button>
-  <button id="navHistory" class="tab-nav-btn">
-    <span data-i18n="tabRecentCommands">Recent Commands</span>
+  <button id="navHistory" type="button" class="tab-nav-btn" role="tab" aria-selected="false" aria-controls="paneHistory" tabindex="-1">
+    <span data-i18n="tabRecentCommands" data-tip-overflow>History</span>
     <span id="histBadge" class="nav-badge">0</span>
   </button>
 </div>
-<div id="panePerms" class="tab-pane">
+<div id="panePerms" class="tab-pane scroll" role="tabpanel" aria-labelledby="navPerms">
+  <div class="profiles">
+    <div id="profileSeg" class="seg" role="radiogroup" data-i18n-aria="tabPermissions" aria-label="Permissions" aria-describedby="profileDesc">
+      <button type="button" role="radio" aria-checked="false" data-profile="read" data-i18n="profileRead" data-tip-overflow tabindex="-1">Read</button>
+      <button type="button" role="radio" aria-checked="false" data-profile="standard" data-i18n="profileStandard" data-tip-overflow tabindex="-1">Standard</button>
+      <button type="button" role="radio" aria-checked="false" data-profile="full" data-i18n="profileFull" data-tip-overflow tabindex="-1">Full</button>
+      <button type="button" role="radio" aria-checked="false" data-profile="custom" data-i18n="profileCustom" aria-disabled="true" data-tip-overflow tabindex="-1">Custom</button>
+    </div>
+    <div id="profileDesc" class="profile-desc" data-tip-overflow></div>
+  </div>
   <div class="toolbar">
     <div class="search">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-      <input id="q" type="search" placeholder="Search permissions…" data-i18n-placeholder="searchPlaceholder" autocomplete="off" />
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="q" type="search" placeholder="Search permissions…" data-i18n-placeholder="searchPlaceholder" data-i18n-aria="searchPlaceholder" aria-label="Search permissions…" autocomplete="off" />
     </div>
-    <button id="allOn" class="btn" data-i18n="btnAll">All</button>
-    <button id="allOff" class="btn" data-i18n="btnNone">None</button>
   </div>
-  <div class="perm-note" data-i18n="permsAgentNote">The AI agent can only turn permissions off. Turning them back on is only possible here.</div>
-  <div id="cats"></div>
+  <div class="perm-note" data-i18n="permsAgentNote">The agent can only switch permissions off.</div>
+  <div id="cats" class="scroll"></div>
 </div>
-<div id="paneHistory" class="tab-pane hidden">
+<div id="paneHistory" class="tab-pane" role="tabpanel" aria-labelledby="navHistory" hidden>
   <div class="hist-toolbar">
-    <span data-i18n="executionHistory">Execution History</span>
-    <button id="clearHist" class="btn-xs" data-i18n="btnClear">Clear</button>
+    <div class="chips" role="group">
+      <button id="filterAll" type="button" class="chip" data-filter="all" aria-pressed="true"><span data-i18n="historyFilterAll">All</span></button>
+      <button id="filterErrors" type="button" class="chip" data-filter="errors" aria-pressed="false"><span data-i18n="historyFilterErrors">Errors</span><span id="errCount" class="chip-count" hidden></span></button>
+    </div>
+    <button id="clearHist" type="button" class="btn-xs" data-i18n="btnClear">Clear</button>
   </div>
-  <div id="histList"></div>
+  <div id="histList" class="scroll"></div>
 </div>
 <footer>
-  <div class="port-row">
-    <span class="fdot"></span>
-    <label for="portInput" data-i18n="portLabel">Port:</label>
-    <input id="portInput" type="number" min="1024" max="65535" value="8765" />
-    <button id="portSave" class="btn-xs" data-i18n-title="portSaveTitle" title="Apply Port & Reconnect" data-i18n="portSaveBtn">Set</button>
-    <button id="portReset" class="btn-xs" data-i18n-title="portResetTitle" title="Reset to default 8765">↺</button>
-  </div>
-  <div class="lang-dropdown" id="langDropdown">
-    <button type="button" class="lang-btn" id="langBtn" data-i18n-title="langSelectTitle" title="Language" aria-haspopup="listbox" aria-expanded="false">
-      <svg class="lang-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>
-      </svg>
-      <span id="langCurrentText" class="lang-current">Türkçe</span>
-      <svg class="lang-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="m6 9 6 6 6-6"/>
-      </svg>
-    </button>
-    <div class="lang-menu" id="langMenu" role="listbox">
-      <div class="lang-item" data-val="auto">
-        <span data-i18n="langAuto">🌐 Auto</span>
-        <svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-      </div>
-      <div class="lang-item" data-val="en">
-        <span>English</span>
-        <svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-      </div>
-      <div class="lang-item" data-val="tr">
-        <span>Türkçe</span>
-        <svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-      </div>
-      <div class="lang-item" data-val="es">
-        <span>Español</span>
-        <svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-      </div>
-      <div class="lang-item" data-val="de">
-        <span>Deutsch</span>
-        <svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-      </div>
-      <div class="lang-item" data-val="fr">
-        <span>Français</span>
-        <svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-      </div>
-      <div class="lang-item" data-val="pt_BR">
-        <span>Português</span>
-        <svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-      </div>
-      <div class="lang-item" data-val="it">
-        <span>Italiano</span>
-        <svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-      </div>
-      <div class="lang-item" data-val="ru">
-        <span>Русский</span>
-        <svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-      </div>
-      <div class="lang-item" data-val="ja">
-        <span>日本語</span>
-        <svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-      </div>
-      <div class="lang-item" data-val="ko">
-        <span>한국어</span>
-        <svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-      </div>
-    </div>
-  </div>
+  <button id="stopAll" type="button" class="btn-stop" data-i18n-tip="stopAllHint" data-tip="Switch every permission off and cancel running commands">
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2.5"/></svg>
+    <span id="stopAllTx" data-tip-overflow>Stop agent</span>
+  </button>
 </footer>
+<dialog id="confirmDlg" class="dlg" role="dialog" aria-modal="true" aria-labelledby="dlgTitle" aria-describedby="dlgBody">
+  <h1 id="dlgTitle" class="dlg-title"></h1>
+  <p id="dlgBody" class="dlg-body"></p>
+  <div class="dlg-actions">
+    <button id="dlgCancel" type="button" class="btn" autofocus>Cancel</button>
+    <button id="dlgOk" type="button" class="btn danger"></button>
+  </div>
+</dialog>
+<!-- The one tooltip of the popup: filled and placed by popup.js (textContent only). -->
+<div id="tip" class="tip" role="tooltip" popover="manual"></div>
 <script src="i18n.js"></script>
 <script src="popup.js"></script>
 </body>

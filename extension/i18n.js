@@ -78,10 +78,21 @@ const I18N = (() => {
       if (key) el.placeholder = t(key, el.placeholder);
     });
 
-    document.querySelectorAll("[data-i18n-title]").forEach((el) => {
-      const key = el.getAttribute("data-i18n-title");
-      if (key) el.title = t(key, el.title);
+    // Tooltip texts: popup.js shows data-tip in its themed tooltip (#tip), never a
+    // native title.
+    document.querySelectorAll("[data-i18n-tip]").forEach((el) => {
+      const key = el.getAttribute("data-i18n-tip");
+      if (key) el.setAttribute("data-tip", t(key, el.getAttribute("data-tip") || ""));
     });
+
+    // Accessible names of icon-only controls and unlabeled groups.
+    document.querySelectorAll("[data-i18n-aria]").forEach((el) => {
+      const key = el.getAttribute("data-i18n-aria");
+      if (key) el.setAttribute("aria-label", t(key, el.getAttribute("aria-label") || ""));
+    });
+
+    // Screen readers pick the voice from the page language.
+    if (document.documentElement) document.documentElement.lang = activeLocale.replace("_", "-");
 
     const langSel = document.getElementById("langSelect");
     if (langSel && document.activeElement !== langSel) {

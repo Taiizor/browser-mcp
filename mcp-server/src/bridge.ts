@@ -1257,8 +1257,8 @@ export class ExtensionBridge implements IBridge {
     ws.on("error", (e) => this.log(`ws error: ${errText(e)}`));
 
     if (peer.kind === "extension") {
-      // Untrusted id and pairing closed: refuse right away (the extension
-      // shows the 4003 reason in its popup).
+      // Untrusted id and pairing closed: refuse right away (on 4003 the
+      // extension popup shows "Extension not recognized" with a Copy ID button).
       if (!this.isTrusted(peer.extId!) && !this.tofuOpen()) {
         this.rejectExtension(ws, peer);
         return;

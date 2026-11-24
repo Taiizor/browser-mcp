@@ -29,7 +29,11 @@
   },
   "statusRejected": {
     "message": "Reddedildi",
-    "description": "Status badge when the MCP server refused the connection"
+    "description": "Status badge when the MCP server does not trust this extension's id"
+  },
+  "statusDisconnected": {
+    "message": "Bağlantı kesildi",
+    "description": "Status badge when the MCP server closed the connection for another reason (for example a handshake timeout)"
   },
   "statusPairedTitle": {
     "message": "MCP sunucusuyla eşleştirildi",
@@ -39,41 +43,25 @@
     "message": "Bağlandı, MCP sunucusunun el sıkışması bekleniyor",
     "description": "Status badge tooltip while connected but the server handshake is pending"
   },
-  "activeTabTag": {
-    "message": "🌐 Sekme",
-    "description": "Active tab prefix"
-  },
   "tabPermissions": {
     "message": "İzinler",
     "description": "Navigation button for permissions"
   },
   "tabRecentCommands": {
-    "message": "Son Komutlar",
-    "description": "Navigation button for recent commands"
+    "message": "Geçmiş",
+    "description": "Navigation tab for the command history pane"
   },
   "searchPlaceholder": {
     "message": "İzinlerde ara…",
     "description": "Search input placeholder"
-  },
-  "btnAll": {
-    "message": "Tümü",
-    "description": "Enable all button"
-  },
-  "btnNone": {
-    "message": "Hiçbiri",
-    "description": "Disable all button"
   },
   "noResults": {
     "message": "Sonuç bulunamadı",
     "description": "Search no results text"
   },
   "permsAgentNote": {
-    "message": "Yapay zekâ ajanı izinleri yalnızca kapatabilir. Yeniden açmak yalnızca buradan mümkündür.",
+    "message": "Ajan izinleri yalnızca kapatabilir.",
     "description": "Hint under the permission search: the agent can only disable permissions"
-  },
-  "executionHistory": {
-    "message": "Çalıştırma Geçmişi",
-    "description": "History section title"
   },
   "btnClear": {
     "message": "Temizle",
@@ -116,24 +104,8 @@
     "description": "Language selector tooltip"
   },
   "langAuto": {
-    "message": "🌐 Otomatik",
-    "description": "Auto language label"
-  },
-  "trustRejectedTitle": {
-    "message": "MCP sunucusu bu eklentiyi reddetti",
-    "description": "Notice title when the MCP server rejected this extension id (close code 4003)"
-  },
-  "trustRejectedBody": {
-    "message": "Bu eklentinin kimliği sunucunun güvenilenler listesinde yok. Aşağıdakilerden birini yapın, ardından MCP sunucusunu yeniden başlatın:",
-    "description": "Notice text explaining how to make the MCP server trust this extension"
-  },
-  "trustOptEnv": {
-    "message": "MCP sunucusu için şu ortam değişkenini ayarlayın:",
-    "description": "Notice option: environment variable to trust this extension id"
-  },
-  "trustOptReset": {
-    "message": "Ya da bağlanan bir sonraki eklentiyle yeniden eşleşmek için bu dosyayı silin:",
-    "description": "Notice option: delete the trusted-extensions file to pair again"
+    "message": "Otomatik",
+    "description": "Language option that follows the browser's language (no emoji or icon)"
   },
   "extensionIdLabel": {
     "message": "Eklenti kimliği",
@@ -147,16 +119,12 @@
     "message": "Kopyalandı",
     "description": "Copy button feedback after copying"
   },
-  "serverClosedTitle": {
-    "message": "MCP sunucusu bağlantıyı kapattı",
-    "description": "Notice title when the MCP server closed the connection with another code"
-  },
   "statusActionNeeded": {
-    "message": "İşlem gerekli",
-    "description": "Status badge when the user must decide whether to accept a new pairing offer"
+    "message": "Eşleştirme gerekli",
+    "description": "Status badge when this browser has to pair with the MCP server again (new pairing offer, rejected pairing proof or pairing closed)"
   },
   "statusUntrustedServer": {
-    "message": "Sunucu doğrulanmadı",
+    "message": "Tanınmayan sunucu",
     "description": "Status badge when the program on the port could not prove it is the paired MCP server"
   },
   "statusUpdateNeeded": {
@@ -166,10 +134,6 @@
   "pairInfoHandshake": {
     "message": "MCP sunucusu doğrulanıyor…",
     "description": "Pairing status line while the server is being verified"
-  },
-  "pairInfoHasKey": {
-    "message": "Bu tarayıcıda bir eşleştirme anahtarı var",
-    "description": "Pairing status line when not connected but a pairing key is stored"
   },
   "pairInfoNoKey": {
     "message": "Henüz eşleştirilmedi",
@@ -187,21 +151,9 @@
     "message": "Eşleştirmeyi unut",
     "description": "Small action that deletes the stored pairing key"
   },
-  "btnForgetConfirm": {
-    "message": "Unutmak için tekrar tıklayın",
-    "description": "Forget-pairing action after the first click: asks for a confirming second click"
-  },
   "forgetPairingTitle": {
     "message": "Bu tarayıcının eşleştirme anahtarını siler ve yeniden bağlanır. Eşleştirme öneren bir sonraki MCP sunucusuna otomatik olarak güvenilir.",
     "description": "Tooltip of the forget-pairing action"
-  },
-  "pairRepairTitle": {
-    "message": "MCP sunucusu yeniden eşleştirme istiyor",
-    "description": "Notice title when the server offered a new pairing and the extension declined it"
-  },
-  "pairRepairBody": {
-    "message": "Bu porttaki bir sunucu yeni bir eşleştirme anahtarı önerdi, ancak bu tarayıcı zaten başka bir anahtarla eşleştirilmiş. Yeniden eşleştir düğmesine yalnızca MCP sunucusunu kendiniz sıfırladıysanız veya yeniden kurduysanız tıklayın; aksi halde başka bir program sunucunun kılığına giriyor olabilir.",
-    "description": "Notice text for the re-pair offer; must name the Re-pair button (btnRepair)"
   },
   "btnRepair": {
     "message": "Yeniden eşleştir",
@@ -214,50 +166,6 @@
   "repairTitle": {
     "message": "Sunucunun bir sonraki eşleştirme önerisini (2 dakika boyunca) kabul et ve şimdi yeniden bağlan",
     "description": "Tooltip of the Re-pair button"
-  },
-  "pairClosedTitle": {
-    "message": "MCP sunucusunda eşleştirme kapalı",
-    "description": "Notice title when the server refuses new pairings (close code 4004)"
-  },
-  "pairClosedBody": {
-    "message": "Sunucu zaten başka bir kurulumla eşleştirilmiş. Sunucuyu bir kez --pair (veya BROWSER_MCP_PAIR=1) ile başlatın ya da sunucunun yapılandırma dizinindeki extension-keys.json dosyasını silin.",
-    "description": "Notice text for pairing-closed; keep --pair, BROWSER_MCP_PAIR=1 and extension-keys.json unchanged"
-  },
-  "pairKeysFileLabel": {
-    "message": "Eşleştirme dosyası (sunucunun varsayılan yapılandırma dizini):",
-    "description": "Label above the default path of the server pairing file"
-  },
-  "serverAuthFailedTitle": {
-    "message": "Sunucu kimliğini kanıtlayamadı",
-    "description": "Notice title when the server failed the pairing challenge (close code 4101)"
-  },
-  "serverAuthFailedBody": {
-    "message": "Bu porttaki program bu tarayıcının eşleştirme anahtarına sahip değil, bu yüzden hiçbir komut çalıştırılmadı. Sunucunun eşleştirme verilerini siz sıfırladıysanız, sunucunun yapılandırma dizinindeki extension-keys.json dosyasını silin, sunucuyu yeniden başlatın ve istendiğinde burada Yeniden eşleştir düğmesine tıklayın. Aksi halde bu portu başka bir program dinliyor olabilir.",
-    "description": "Notice text for server-auth-failed; keep extension-keys.json unchanged and name the Re-pair button"
-  },
-  "authFailedTitle": {
-    "message": "MCP sunucusu bu tarayıcının eşleştirme kanıtını reddetti",
-    "description": "Notice title when the server rejected the extension proof (close code 4005)"
-  },
-  "authFailedBody": {
-    "message": "Sunucuda bu tarayıcı için farklı bir eşleştirme anahtarı var. Sunucunun yapılandırma dizinindeki extension-keys.json dosyasını silin, sunucuyu yeniden başlatın ve istendiğinde burada Yeniden eşleştir düğmesine tıklayın.",
-    "description": "Notice text for auth-failed; keep extension-keys.json unchanged and name the Re-pair button"
-  },
-  "protocolMismatchTitle": {
-    "message": "Eklenti ve MCP sunucusu sürümleri uyuşmuyor",
-    "description": "Notice title when the bridge protocol versions differ"
-  },
-  "protocolUpdateServer": {
-    "message": "MCP sunucusu bu eklentiden daha eski. MCP sunucusunu eklentiyle aynı sürüme güncelleyin ve yeniden başlatın.",
-    "description": "Protocol mismatch advice: the server is outdated"
-  },
-  "protocolUpdateExtension": {
-    "message": "Bu eklenti MCP sunucusundan daha eski. Eklentiyi sunucuyla aynı sürüme güncelleyin ve yeniden yükleyin.",
-    "description": "Protocol mismatch advice: the extension is outdated"
-  },
-  "protocolUpdateBoth": {
-    "message": "Eklenti ve MCP sunucusu farklı protokol sürümleri kullanıyor. İkisini de aynı sürüme güncelleyin.",
-    "description": "Protocol mismatch advice when the outdated side is unknown"
   },
   "cat_tabs": {
     "message": "Sekmeler ve Pencereler",
@@ -312,7 +220,7 @@
     "description": "Category: Dialogs"
   },
   "cat_power": {
-    "message": "Gelişmiş Kod (Arbitrary Code)",
+    "message": "Serbest kod çalıştırma",
     "description": "Category: Power"
   },
   "cat_trusted": {
@@ -342,5 +250,297 @@
   "cat_performance": {
     "message": "Performans",
     "description": "Category: Performance"
+  },
+  "menuTitle": {
+    "message": "Diğer",
+    "description": "Accessible name and tooltip of the header button (⋯) that opens the settings menu"
+  },
+  "menuExtension": {
+    "message": "Eklenti",
+    "description": "Settings menu section: this extension's version and ID"
+  },
+  "menuPort": {
+    "message": "Köprü portu",
+    "description": "Settings menu section: the local port the extension uses to reach the MCP server"
+  },
+  "menuLanguage": {
+    "message": "Dil",
+    "description": "Settings menu section: the popup language"
+  },
+  "menuPairing": {
+    "message": "Eşleştirme",
+    "description": "Settings menu section: re-pair with or forget the MCP server pairing"
+  },
+  "agentTabsNone": {
+    "message": "Ajan sekmesi yok",
+    "description": "Status line under the header: the agent works in no tab (lower case, it follows a separator)"
+  },
+  "agentTabsOne": {
+    "message": "1 ajan sekmesi",
+    "description": "Status line under the header: the agent works in one tab"
+  },
+  "agentTabsMany": {
+    "message": "{n} ajan sekmesi",
+    "description": "Status line under the header: number of tabs the agent works in. Keep {n} unchanged: it is replaced by the number (2 or more)"
+  },
+  "agentTabsTitle": {
+    "message": "Ajanın çalıştığı sekmeler",
+    "description": "Heading of the list of tabs the agent works in (click a tab to switch to it)"
+  },
+  "activityNow": {
+    "message": "Şimdi:",
+    "description": "Live activity strip: label before the command the agent is running right now. Include the colon, with your language's spacing (French: \"En cours :\")"
+  },
+  "activityMore": {
+    "message": "+{n} daha",
+    "description": "Live activity strip: how many other commands are running at the same time. Keep {n} unchanged: it is replaced by the number"
+  },
+  "profileRead": {
+    "message": "Okuma",
+    "description": "Permission profile (short button label): read-only access"
+  },
+  "profileReadDesc": {
+    "message": "Sayfaları gezme, okuma ve ekran görüntüsü alma. Tıklama ya da yazma yapılmaz.",
+    "description": "Description of the Read permission profile"
+  },
+  "profileStandard": {
+    "message": "Standart",
+    "description": "Permission profile (short button label): everything except high-risk access"
+  },
+  "profileStandardDesc": {
+    "message": "Ek olarak tıklama, yazma, ağ ve geliştirici araçları. Yüksek riskli erişim yok.",
+    "description": "Description of the Standard permission profile"
+  },
+  "profileFull": {
+    "message": "Tam",
+    "description": "Permission profile (short button label): every permission on"
+  },
+  "profileFullDesc": {
+    "message": "Kod çalıştırma, çerezler, depolama ve geçmiş dahil her şey.",
+    "description": "Description of the Full permission profile"
+  },
+  "profileCustom": {
+    "message": "Özel",
+    "description": "Permission profile (short button label): shown when the switches match no profile; not clickable"
+  },
+  "profileCustomDesc": {
+    "message": "Kendi seçiminiz.",
+    "description": "Description shown when the permission switches match no profile"
+  },
+  "riskHigh": {
+    "message": "Yüksek risk",
+    "description": "Small badge on permission categories that can reach private data or run code"
+  },
+  "confirmHighRiskTitle": {
+    "message": "Yüksek riskli erişime izin verilsin mi?",
+    "description": "Title of the confirmation dialog shown before switching on high-risk permissions"
+  },
+  "confirmHighRiskBody": {
+    "message": "Ajan şunları kullanabilecek: {cats}. Bunlar oturum açma bilgileri, çerezler, depolama, pano ve geçmiş gibi özel verileri okuyabilir veya değiştirebilir ya da sayfalarda herhangi bir kodu çalıştırabilir.",
+    "description": "Body of the high-risk confirmation dialog. Keep {cats} unchanged: it is replaced by a comma-separated list of permission category names"
+  },
+  "confirmAllow": {
+    "message": "İzin ver",
+    "description": "Confirmation dialog button that switches the high-risk permissions on"
+  },
+  "confirmCancel": {
+    "message": "İptal",
+    "description": "Confirmation dialog button that closes the dialog without changing anything"
+  },
+  "confirmForgetTitle": {
+    "message": "Eşleştirme unutulsun mu?",
+    "description": "Title of the confirmation dialog shown before deleting the pairing key"
+  },
+  "confirmForgetBody": {
+    "message": "Bu tarayıcıdaki eşleştirme anahtarı silinir. Yeniden bağlanmak için sunucuyu bir kez --pair ile başlatın.",
+    "description": "Body of the forget-pairing confirmation dialog; keep --pair unchanged"
+  },
+  "agentDisabledBadge": {
+    "message": "Ajan kapattı",
+    "description": "Small badge next to a permission the AI agent switched off itself"
+  },
+  "agentDisabledHint": {
+    "message": "Bunu ajan kapattı. Yalnızca siz yeniden açabilirsiniz.",
+    "description": "Tooltip of the off-by-agent badge"
+  },
+  "stopAll": {
+    "message": "Ajanı durdur",
+    "description": "Footer button that switches every permission off and cancels running commands"
+  },
+  "stopAllHint": {
+    "message": "Tüm izinleri kapat ve çalışan komutları iptal et",
+    "description": "Tooltip of the Stop agent button"
+  },
+  "stopAllDone": {
+    "message": "Her şey kapatıldı",
+    "description": "Stop agent button label for a moment after it switched everything off"
+  },
+  "historyFilterAll": {
+    "message": "Tümü",
+    "description": "History filter chip: show every command"
+  },
+  "historyFilterErrors": {
+    "message": "Hatalar",
+    "description": "History filter chip: show only failed commands"
+  },
+  "historyNoErrors": {
+    "message": "Başarısız komut yok",
+    "description": "History list text when the Errors filter matches nothing"
+  },
+  "historyUnknownSite": {
+    "message": "Sayfa yok",
+    "description": "History group heading for commands that did not act on a web page"
+  },
+  "catDesc_tabs": {
+    "message": "Sekme ve pencere açma, geçiş yapma, gezinme ve kapatma",
+    "description": "One-line description of the Tabs & Windows permission category"
+  },
+  "catDesc_read": {
+    "message": "Sayfa metnini, HTML kodunu ve yapısını okuma",
+    "description": "One-line description of the Page: Read permission category"
+  },
+  "catDesc_interact": {
+    "message": "Tıklama, yazma, form doldurma ve dosya yükleme",
+    "description": "One-line description of the Page: Interact permission category"
+  },
+  "catDesc_media": {
+    "message": "Ekran görüntüleri, PDF'ler ve sekme sesi",
+    "description": "One-line description of the Media permission category"
+  },
+  "catDesc_console": {
+    "message": "Sayfa konsolunu okuma",
+    "description": "One-line description of the Console permission category"
+  },
+  "catDesc_network": {
+    "message": "İstek ve yanıtları görme, hız kısıtlama, başlık ekleme",
+    "description": "One-line description of the Network: Observe permission category"
+  },
+  "catDesc_mock": {
+    "message": "Ağ yanıtlarını engelleme veya taklit etme",
+    "description": "One-line description of the Network: Intercept permission category"
+  },
+  "catDesc_downloads": {
+    "message": "İndirmeleri yönetme",
+    "description": "One-line description of the Downloads permission category"
+  },
+  "catDesc_bookmarks": {
+    "message": "Yer işareti arama, ekleme ve kaldırma",
+    "description": "One-line description of the Bookmarks permission category"
+  },
+  "catDesc_cookies": {
+    "message": "Oturum açma bilgileri dahil çerezleri okuma ve değiştirme",
+    "description": "One-line description of the Cookies permission category"
+  },
+  "catDesc_storage": {
+    "message": "Site depolamasını ve IndexedDB'yi okuma ve değiştirme",
+    "description": "One-line description of the Storage permission category"
+  },
+  "catDesc_sessions": {
+    "message": "Kapatılan sekmeleri geri yükleme, oturum durumunu kaydetme ve yükleme",
+    "description": "One-line description of the Sessions & State permission category"
+  },
+  "catDesc_dialogs": {
+    "message": "Uyarı, onay ve giriş istemi diyaloglarını yanıtlama",
+    "description": "One-line description of the Dialogs permission category"
+  },
+  "catDesc_power": {
+    "message": "Sayfalarda herhangi bir kodu çalıştırma (diğer her şeye erişir)",
+    "description": "One-line description of the Power (arbitrary code) permission category"
+  },
+  "catDesc_trusted": {
+    "message": "Gerçek fare ve klavye girişi",
+    "description": "One-line description of the Trusted Input (CDP) permission category"
+  },
+  "catDesc_clipboard": {
+    "message": "Panoyu okuma ve panoya yazma",
+    "description": "One-line description of the Clipboard permission category"
+  },
+  "catDesc_browsing_data": {
+    "message": "Geçmişi, önbelleği ve çerezleri temizleme",
+    "description": "One-line description of the Browsing Data permission category"
+  },
+  "catDesc_notifications": {
+    "message": "Masaüstü bildirimleri gösterme",
+    "description": "One-line description of the Notifications permission category"
+  },
+  "catDesc_emulation": {
+    "message": "Cihaz, ekran, CPU ve konum emülasyonu",
+    "description": "One-line description of the Emulation permission category"
+  },
+  "catDesc_performance": {
+    "message": "Sayfa hızını ölçme ve performans izi kaydetme",
+    "description": "One-line description of the Performance permission category"
+  },
+  "catDesc_system": {
+    "message": "Tarama geçmişi ve site izinleri",
+    "description": "One-line description of the System permission category"
+  },
+  "pairedShort": {
+    "message": "Eşleştirildi",
+    "description": "Short pairing state in the line under the popup header (the full text is its tooltip)"
+  },
+  "noticeUnknownServerTitle": {
+    "message": "Tanınmayan sunucu",
+    "description": "Notice title when the program on the bridge port could not prove it is the paired MCP server. Same words as the matching help heading"
+  },
+  "noticeUnknownServerBody": {
+    "message": "Bu porttaki program, eşleştirdiğiniz sunucu değil. Hiçbir komut çalıştırılmadı.",
+    "description": "Notice text for an unknown server: it is not the paired server and nothing was run. Keep it as short as the English; no file names or settings"
+  },
+  "noticeRepairTitle": {
+    "message": "Eşleştirme gerekli",
+    "description": "Notice title when this browser has to pair with the MCP server again; the notice shows the Re-pair button"
+  },
+  "noticeRepairBody": {
+    "message": "Sunucuyu kendiniz sıfırladıysanız yeniden eşleştirin.",
+    "description": "Notice text next to the Re-pair button: pair again only if the user reset the server. One short sentence"
+  },
+  "noticeAuthFailedBody": {
+    "message": "Eşleştirmeyi unutun, ardından sunucuyu bir kez --pair ile başlatın.",
+    "description": "Notice text when the MCP server rejected this browser's pairing proof, next to the Forget pairing button. Keep --pair verbatim. One short sentence"
+  },
+  "noticePairClosedTitle": {
+    "message": "Eşleştirme kapalı",
+    "description": "Notice title when the MCP server accepts no new pairing because it is paired with another install"
+  },
+  "noticePairClosedBody": {
+    "message": "Sunucuyu bir kez --pair ile başlatın.",
+    "description": "Notice text when pairing is closed. Keep --pair unchanged: it is a command-line flag. One short sentence"
+  },
+  "noticeVersionTitle": {
+    "message": "Sürümler uyuşmuyor",
+    "description": "Notice title when the extension and the MCP server use different protocol versions"
+  },
+  "noticeVersionServer": {
+    "message": "MCP sunucusunu bu eklentinin sürümüne güncelleyin.",
+    "description": "Version notice text when the MCP server is the older side. One short sentence"
+  },
+  "noticeVersionExtension": {
+    "message": "Bu eklentiyi MCP sunucusunun sürümüne güncelleyin.",
+    "description": "Version notice text when this extension is the older side. One short sentence"
+  },
+  "noticeVersionBoth": {
+    "message": "Eklentiyi ve MCP sunucusunu aynı sürüme güncelleyin.",
+    "description": "Version notice text when it is unknown which side is older. One short sentence"
+  },
+  "noticeRejectedTitle": {
+    "message": "Eklenti tanınmadı",
+    "description": "Notice title when the MCP server does not trust this extension's ID"
+  },
+  "noticeRejectedBody": {
+    "message": "Bu eklentinin kimliğini sunucunun güvenilen eklentiler listesine ekleyin.",
+    "description": "Notice text next to the Copy ID button (btnCopyId): the user adds the copied ID to the server's trusted list. One short sentence"
+  },
+  "noticeClosedTitle": {
+    "message": "Bağlantı kapandı",
+    "description": "Notice title when the MCP server closed the connection for another reason (the notice has no further text)"
+  },
+  "btnDetails": {
+    "message": "Ayrıntılar",
+    "description": "Link-style button in every notice that opens the matching help section on GitHub"
+  },
+  "btnCopyId": {
+    "message": "Kimliği kopyala",
+    "description": "Notice button that copies this extension's ID to the clipboard"
   }
 }
